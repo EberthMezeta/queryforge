@@ -73,6 +73,16 @@ export class OracleAdapter implements IAdapter {
     return { columns: columns.length ? columns : Object.keys(rows[0] ?? {}), rows, rowCount: rows.length, duration: Date.now() - start };
   }
 
+  async getTableDDL(_database: string, table: string): Promise<string> {
+    if (!this.conn) throw new Error('Not connected');
+    const result = await this.conn.execute(
+      `SELECT DBMS_METADATA.GET_DDL('TABLE', :1) AS ddl FROM DUAL`,
+      [table.toUpperCase()],
+    );
+    const rows = (result.rows ?? []) as Record<string, unknown>[];
+    return String(rows[0]?.DDL ?? '');
+  }
+
   async getProcedures(_database: string): Promise<ProcedureInfo[]> {
     if (!this.conn) throw new Error('Not connected');
     const result = await this.conn.execute(

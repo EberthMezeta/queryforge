@@ -99,6 +99,25 @@ export class SqlServerAdapter implements IAdapter {
     };
   }
 
+  async getTableDDL(database: string, table: string): Promise<string> {
+    if (!this.pool) throw new Error('Not connected');
+    const safe = table.replace(/'/g, "''");
+    const result = await this.pool.request().query(`
+      SELECT 'CREATE TABLE [' + TABLE_SCHEMA + '].[' + TABLE_NAME + '] (' + CHAR(10) +
+        STRING_AGG(
+          '  [' + COLUMN_NAME + '] ' + DATA_TYPE +
+          CASE WHEN CHARACTER_MAXIMUM_LENGTH IS NOT NULL
+               THEN '(' + CAST(CHARACTER_MAXIMUM_LENGTH AS VARCHAR) + ')' ELSE '' END +
+          CASE WHEN IS_NULLABLE = 'NO' THEN ' NOT NULL' ELSE ' NULL' END,
+          ',' + CHAR(10)
+        ) WITHIN GROUP (ORDER BY ORDINAL_POSITION) + CHAR(10) + ');' AS ddl
+      FROM [${database}].INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = '${safe}' AND TABLE_SCHEMA = 'dbo'
+      GROUP BY TABLE_SCHEMA, TABLE_NAME
+    `);
+    return (result.recordset[0]?.ddl as string) ?? '';
+  }
+
   async getProcedures(database: string): Promise<ProcedureInfo[]> {
     if (!this.pool) throw new Error('Not connected');
     const result = await this.pool.request().query(`

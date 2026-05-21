@@ -4,7 +4,7 @@ import { ConnectionConfig } from '../types';
 import { BookmarkStorage } from '../storage/BookmarkStorage';
 
 interface WebviewMessage {
-  type: 'ready' | 'runQuery' | 'saveBookmark' | 'deleteBookmark';
+  type: 'ready' | 'runQuery' | 'saveBookmark' | 'deleteBookmark' | 'cancelQuery';
   sql?: string;
   database?: string;
   name?: string;
@@ -16,6 +16,8 @@ export class QueryPanel {
 
   private readonly panel: vscode.WebviewPanel;
   private pendingInit: { connectionName: string; database: string; query: string } | null = null;
+  private cancelFn: (() => void) | null = null;
+  private runningDatabase: string | undefined;
 
   private constructor(
     private readonly context: vscode.ExtensionContext,
@@ -80,13 +82,38 @@ export class QueryPanel {
       return;
     }
 
+    if (msg.type === 'cancelQuery') {
+      this.cancelFn?.();
+      if (this.adapter.cancelQuery) {
+        this.adapter.cancelQuery(this.runningDatabase).catch(() => {});
+      }
+      return;
+    }
+
     if (msg.type === 'runQuery' && msg.sql) {
       this.send({ type: 'loading' });
+      this.runningDatabase = msg.database;
+      let cancelled = false;
+
+      const cancelPromise = new Promise<never>((_, reject) => {
+        this.cancelFn = () => { cancelled = true; reject(new Error('Query cancelled')); };
+      });
+
       try {
-        const result = await this.adapter.query(msg.sql, msg.database);
+        const result = await Promise.race([
+          this.adapter.query(msg.sql, msg.database),
+          cancelPromise,
+        ]);
         this.send({ type: 'queryResult', ...result });
       } catch (err: unknown) {
-        this.send({ type: 'queryError', message: err instanceof Error ? err.message : String(err) });
+        if (cancelled) {
+          this.send({ type: 'queryCancelled' });
+        } else {
+          this.send({ type: 'queryError', message: err instanceof Error ? err.message : String(err) });
+        }
+      } finally {
+        this.cancelFn = null;
+        this.runningDatabase = undefined;
       }
       return;
     }
@@ -213,12 +240,17 @@ export class QueryPanel {
     </div>
   </div>
 
+  <div id="cancelled-section" hidden>
+    <span id="cancelled-msg">Query cancelled</span>
+  </div>
+
   <div id="error-section" hidden>
     <pre id="error-msg"></pre>
   </div>
 
   <div id="loading-section" hidden>
     <div class="loading">Executing query…</div>
+    <button id="cancel-btn" class="btn btn-danger">✕ Cancel</button>
   </div>
 
   <script nonce="${nonce}" src="${webviewUri}"></script>
@@ -368,6 +400,10 @@ kbd{
   color:var(--vscode-errorForeground);
   padding:12px;border-radius:4px;font-size:12px;white-space:pre-wrap;
 }
-#loading-section{flex:1;display:flex;align-items:center;justify-content:center}
+#loading-section{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
 .loading{color:var(--vscode-descriptionForeground);font-size:13px}
+.btn-danger{background:var(--vscode-inputValidation-errorBackground);color:var(--vscode-errorForeground);border:1px solid var(--vscode-inputValidation-errorBorder)}
+.btn-danger:hover{opacity:0.85}
+#cancelled-section{flex:1;display:flex;align-items:center;justify-content:center}
+#cancelled-msg{color:var(--vscode-descriptionForeground);font-size:13px}
 `;

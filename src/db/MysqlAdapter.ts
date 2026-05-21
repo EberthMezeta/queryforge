@@ -5,6 +5,7 @@ import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, Pro
 export class MysqlAdapter implements IAdapter {
   private pool: mysql.Pool | null = null;
   private connected = false;
+  private activeConn: mysql.PoolConnection | null = null;
 
   constructor(private readonly config: ConnectionConfig) {}
 
@@ -73,9 +74,17 @@ export class MysqlAdapter implements IAdapter {
     }));
   }
 
+  async cancelQuery(): Promise<void> {
+    if (this.activeConn) {
+      this.activeConn.destroy();
+      this.activeConn = null;
+    }
+  }
+
   async query(sql: string, database?: string): Promise<QueryResult> {
     if (!this.pool) throw new Error('Not connected');
     const conn = await this.pool.getConnection();
+    this.activeConn = conn;
     try {
       if (database) {
         await conn.query(`USE \`${database}\``);
@@ -105,6 +114,19 @@ export class MysqlAdapter implements IAdapter {
         rowCount: ok.affectedRows,
         duration,
       };
+    } finally {
+      this.activeConn = null;
+      conn.release();
+    }
+  }
+
+  async getTableDDL(database: string, table: string): Promise<string> {
+    if (!this.pool) throw new Error('Not connected');
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.query(`USE \`${database}\``);
+      const [rows] = await conn.query<mysql.RowDataPacket[]>(`SHOW CREATE TABLE \`${table}\``);
+      return (rows[0]?.['Create Table'] ?? rows[0]?.['Create View'] ?? '') as string;
     } finally {
       conn.release();
     }

@@ -72,6 +72,12 @@
         "title": "Disconnect",
         "icon": "$(debug-disconnect)",
         "category": "DB Connection"
+      },
+      {
+        "command": "dbConnection.viewDDL",
+        "title": "View DDL",
+        "icon": "$(code)",
+        "category": "DB Connection"
       }
     ],
     "menus": {
@@ -110,6 +116,11 @@
         },
         {
           "command": "dbConnection.openTable",
+          "when": "viewItem == table || viewItem == view",
+          "group": "inline"
+        },
+        {
+          "command": "dbConnection.viewDDL",
           "when": "viewItem == table || viewItem == view",
           "group": "inline"
         }

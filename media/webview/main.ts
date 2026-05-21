@@ -62,6 +62,9 @@ function init() {
   document.getElementById('export-json')!.addEventListener('click', exportJSON);
   document.getElementById('export-pdf')!.addEventListener('click', exportPDF);
 
+  document.getElementById('cancel-btn')!.addEventListener('click', () => {
+    vscode.postMessage({ type: 'cancelQuery' });
+  });
   document.getElementById('page-prev')!.addEventListener('click', () => goToPage(currentPage - 1));
   document.getElementById('page-next')!.addEventListener('click', () => goToPage(currentPage + 1));
 
@@ -95,8 +98,14 @@ function runQuery() {
 }
 
 function showLoading() {
-  hide('results-section'); hide('error-section'); show('loading-section');
+  hide('results-section'); hide('error-section'); hide('cancelled-section'); show('loading-section');
   setExportButtons(false);
+}
+
+function showCancelled() {
+  hide('loading-section'); hide('results-section'); hide('error-section');
+  setExportButtons(false);
+  show('cancelled-section');
 }
 
 function showResults(data: QueryResult) {
@@ -118,7 +127,7 @@ function showResults(data: QueryResult) {
 }
 
 function showError(message: string) {
-  hide('loading-section'); hide('results-section');
+  hide('loading-section'); hide('results-section'); hide('cancelled-section');
   setExportButtons(false);
   document.getElementById('error-msg')!.textContent = message;
   show('error-section');
@@ -390,6 +399,10 @@ window.addEventListener('message', (event) => {
 
     case 'loading':
       showLoading();
+      break;
+
+    case 'queryCancelled':
+      showCancelled();
       break;
 
     case 'bookmarks':

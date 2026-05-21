@@ -70,6 +70,22 @@ export function activate(context: vscode.ExtensionContext): void {
       QueryPanel.createOrShow(context, bookmarks, item.config, item.database, '', item.adapter, false);
     }),
 
+    vscode.commands.registerCommand('dbConnection.viewDDL', async (item: TableItem) => {
+      if (!item.adapter.getTableDDL) return;
+      try {
+        const ddl = await item.adapter.getTableDDL(item.database, item.table);
+        if (!ddl.trim()) {
+          vscode.window.showWarningMessage(`Could not retrieve DDL for "${item.table}".`);
+          return;
+        }
+        QueryPanel.createOrShow(context, bookmarks, item.config, item.database, ddl, item.adapter, false);
+      } catch (err: unknown) {
+        vscode.window.showErrorMessage(
+          `Error reading DDL: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }),
+
     vscode.commands.registerCommand('dbConnection.openProcedure', async (item: ProcedureItem) => {
       if (!item.adapter.getProcedureDefinition) return;
       try {
@@ -86,6 +102,14 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
   );
+
+  // Auto-connect saved connections in the background on startup
+  const savedConnections = storage.getConnections();
+  if (savedConnections.length > 0) {
+    Promise.allSettled(
+      savedConnections.map((config) => provider.getOrConnect(config)),
+    ).then(() => provider.refresh());
+  }
 }
 
 export function deactivate(): void {}

@@ -63,6 +63,14 @@ export class SqliteAdapter implements IAdapter {
     }));
   }
 
+  async getTableDDL(_database: string, table: string): Promise<string> {
+    if (!this.db) throw new Error('Not connected');
+    const result = this.db.exec(
+      `SELECT sql FROM sqlite_master WHERE name = '${table.replace(/'/g, "''")}' LIMIT 1`,
+    );
+    return (result[0]?.values[0]?.[0] as string) ?? '';
+  }
+
   async query(sql: string, _database?: string): Promise<QueryResult> {
     if (!this.db) throw new Error('Not connected');
     const start = Date.now();

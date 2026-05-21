@@ -102,6 +102,34 @@ export class PostgresAdapter implements IAdapter {
     };
   }
 
+  async getTableDDL(database: string, table: string): Promise<string> {
+    const client = await this.getSessionClient(database);
+    const result = await client.query(
+      `SELECT 'CREATE TABLE ' || quote_ident(table_name) || E' (\n' ||
+              string_agg(
+                '  ' || quote_ident(column_name) || ' ' || data_type ||
+                CASE WHEN character_maximum_length IS NOT NULL
+                     THEN '(' || character_maximum_length || ')' ELSE '' END ||
+                CASE WHEN is_nullable = 'NO' THEN ' NOT NULL' ELSE '' END,
+                E',\n' ORDER BY ordinal_position
+              ) || E'\n);' AS ddl
+       FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = $1
+       GROUP BY table_name`,
+      [table],
+    );
+    return (result.rows[0]?.ddl as string) ?? '';
+  }
+
+  async cancelQuery(database?: string): Promise<void> {
+    const db = database || this.config.database || 'postgres';
+    const client = this.sessionClients.get(db);
+    if (client) {
+      await client.end().catch(() => {});
+      this.sessionClients.delete(db);
+    }
+  }
+
   async getProcedures(database: string): Promise<ProcedureInfo[]> {
     const client = await this.getSessionClient(database);
     const result = await client.query(`
