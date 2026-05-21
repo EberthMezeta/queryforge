@@ -9,7 +9,7 @@
 
 ## Media prioridad (UX/productividad)
 
-- [ ] **Historial de queries** — guardar las últimas N queries ejecutadas, navegables con flechas o panel lateral
+- [X] **Historial de queries** — guardar las últimas N queries ejecutadas, navegables con flechas o panel lateral
 - [ ] **Múltiples tabs de resultados** — poder tener varias queries abiertas al mismo tiempo en el mismo panel
 - [X] **Ver DDL de una tabla** — click derecho → "Ver DDL" para mostrar el CREATE TABLE/VIEW de la tabla seleccionada
 - [X] **Stored Procedures y Functions** — carpeta "Procedures" en el árbol; click abre la definición en el editor

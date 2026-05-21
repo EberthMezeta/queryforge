@@ -2,9 +2,10 @@ import * as vscode from 'vscode';
 import { IAdapter } from '../db/IAdapter';
 import { ConnectionConfig } from '../types';
 import { BookmarkStorage } from '../storage/BookmarkStorage';
+import { HistoryStorage } from '../storage/HistoryStorage';
 
 interface WebviewMessage {
-  type: 'ready' | 'runQuery' | 'saveBookmark' | 'deleteBookmark' | 'cancelQuery';
+  type: 'ready' | 'runQuery' | 'saveBookmark' | 'deleteBookmark' | 'cancelQuery' | 'clearHistory';
   sql?: string;
   database?: string;
   name?: string;
@@ -22,6 +23,7 @@ export class QueryPanel {
   private constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly bookmarks: BookmarkStorage,
+    private readonly historyStorage: HistoryStorage,
     private readonly config: ConnectionConfig,
     private readonly database: string,
     initialQuery: string,
@@ -51,6 +53,7 @@ export class QueryPanel {
   static createOrShow(
     context: vscode.ExtensionContext,
     bookmarks: BookmarkStorage,
+    historyStorage: HistoryStorage,
     config: ConnectionConfig,
     database: string,
     initialQuery: string,
@@ -64,7 +67,7 @@ export class QueryPanel {
       if (initialQuery) existing.send({ type: 'setQuery', query: initialQuery, autoRun });
       return;
     }
-    new QueryPanel(context, bookmarks, config, database, initialQuery, adapter);
+    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter);
     void autoRun;
   }
 
@@ -75,6 +78,7 @@ export class QueryPanel {
           type: 'init',
           ...this.pendingInit,
           bookmarks: this.bookmarks.getAll(this.config.id, this.database),
+          history: this.historyStorage.getAll(this.config.id, this.database),
         });
         this.pendingInit = null;
         this.loadSchemaAsync(this.database);
@@ -90,7 +94,15 @@ export class QueryPanel {
       return;
     }
 
+    if (msg.type === 'clearHistory') {
+      this.historyStorage.clear(this.config.id, this.database);
+      this.send({ type: 'history', items: [] });
+      return;
+    }
+
     if (msg.type === 'runQuery' && msg.sql) {
+      const historyItems = this.historyStorage.push(this.config.id, this.database, msg.sql);
+      this.send({ type: 'history', items: historyItems });
       this.send({ type: 'loading' });
       this.runningDatabase = msg.database;
       let cancelled = false;
@@ -182,8 +194,10 @@ export class QueryPanel {
       <span id="db-name" class="db-name"></span>
     </div>
     <div class="toolbar-right">
+      <button id="btn-copy-query" class="btn btn-sm" title="Copy current query">📋 Copy</button>
       <button id="btn-save-query" class="btn btn-sm" title="Save current query">⭐ Save</button>
       <button id="btn-bookmarks" class="btn btn-sm" title="Saved queries">☰ <span id="bookmark-count">0</span></button>
+      <button id="btn-history" class="btn btn-sm" title="Query history (Alt+↑/↓)">⏱ <span id="history-count">0</span></button>
       <div class="export-query-wrap">
         <select id="export-query-fmt" title="Export format">
           <option value="sql">.sql</option>
@@ -208,6 +222,14 @@ export class QueryPanel {
       <button id="bookmark-cancel" class="btn btn-sm">Cancel</button>
     </div>
     <div id="bookmark-list"></div>
+  </div>
+
+  <div id="history-panel" hidden>
+    <div id="history-header">
+      <span class="history-title">Recent queries</span>
+      <button id="btn-clear-history" class="btn btn-sm" title="Clear history">Clear</button>
+    </div>
+    <div id="history-list"></div>
   </div>
 
   <div id="editor-wrap">
@@ -326,8 +348,8 @@ body{
 }
 .bookmark-item:hover{background:var(--vscode-list-hoverBackground)}
 .bookmark-item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bookmark-exp,.bookmark-del{background:none;border:none;cursor:pointer;color:var(--vscode-descriptionForeground);font-size:13px;line-height:1;padding:0 2px;opacity:0.55;flex-shrink:0}
-.bookmark-exp:hover{opacity:1}
+.bookmark-cpy,.bookmark-exp,.bookmark-del{background:none;border:none;cursor:pointer;color:var(--vscode-descriptionForeground);font-size:13px;line-height:1;padding:0 2px;opacity:0.55;flex-shrink:0}
+.bookmark-cpy:hover,.bookmark-exp:hover{opacity:1}
 .bookmark-del:hover{opacity:1;color:var(--vscode-errorForeground)}
 .bookmark-empty{padding:14px 12px;color:var(--vscode-descriptionForeground);font-size:12px;text-align:center}
 #editor-wrap{flex-shrink:0;border-bottom:1px solid var(--vscode-panel-border)}
@@ -406,4 +428,24 @@ kbd{
 .btn-danger:hover{opacity:0.85}
 #cancelled-section{flex:1;display:flex;align-items:center;justify-content:center}
 #cancelled-msg{color:var(--vscode-descriptionForeground);font-size:13px}
+#history-panel{
+  flex-shrink:0;background:var(--vscode-editorWidget-background);
+  border-bottom:1px solid var(--vscode-panel-border);
+  max-height:220px;overflow-y:auto;
+}
+#history-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:5px 12px;border-bottom:1px solid var(--vscode-panel-border);
+  background:var(--vscode-editor-background);
+  position:sticky;top:0;z-index:1;
+}
+.history-title{font-size:11px;color:var(--vscode-descriptionForeground);font-weight:600}
+.history-item{
+  display:flex;align-items:center;gap:10px;padding:6px 12px;
+  cursor:pointer;border-bottom:1px solid var(--vscode-panel-border);
+}
+.history-item:hover{background:var(--vscode-list-hoverBackground)}
+.history-sql{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;font-size:11px}
+.history-time{color:var(--vscode-descriptionForeground);font-size:10px;flex-shrink:0;white-space:nowrap}
+.history-empty{padding:14px 12px;color:var(--vscode-descriptionForeground);font-size:12px;text-align:center}
 `;
