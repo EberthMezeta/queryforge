@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { BaseAdapter } from './BaseAdapter';
 import { IAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo } from '../types';
 
@@ -9,24 +10,23 @@ const INTROSPECTION = `{
   }
 }`;
 
-export class GraphQLAdapter implements IAdapter {
+export class GraphQLAdapter extends BaseAdapter implements IAdapter {
   private connected = false;
 
-  constructor(private readonly config: ConnectionConfig) {}
+  constructor(private readonly config: ConnectionConfig) { super(); }
 
   async connect(): Promise<void> {
     if (!this.config.url) throw new Error('GraphQL endpoint URL is required');
-    // Verify the endpoint responds
     await this.execute('{ __typename }');
     this.connected = true;
   }
 
-  async disconnect(): Promise<void> {
-    this.connected = false;
-  }
+  async disconnect(): Promise<void> { this.connected = false; }
 
-  isConnected(): boolean {
-    return this.connected;
+  isConnected(): boolean { return this.connected; }
+
+  buildDefaultQuery(table: string, _schema?: string): string {
+    return `{\n  ${table} {\n    id\n  }\n}`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
@@ -68,7 +68,6 @@ export class GraphQLAdapter implements IAdapter {
     const data = response.data ?? {};
     const topKeys = Object.keys(data);
 
-    // Normalize: try to find the first array in the result
     for (const key of topKeys) {
       const val = data[key];
       if (Array.isArray(val) && val.length > 0) {
@@ -85,11 +84,7 @@ export class GraphQLAdapter implements IAdapter {
       }
     }
 
-    // Fallback: display as key→value pairs
-    const rows = topKeys.map((k) => ({
-      key: k,
-      value: JSON.stringify(data[k]),
-    }));
+    const rows = topKeys.map((k) => ({ key: k, value: JSON.stringify(data[k]) }));
     return { columns: ['key', 'value'], rows, rowCount: rows.length, duration: Date.now() - start };
   }
 

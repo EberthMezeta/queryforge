@@ -1,13 +1,14 @@
 import mysql from 'mysql2/promise';
-import { IAdapter } from './IAdapter';
+import { BaseAdapter } from './BaseAdapter';
+import { ISchemaAdapter, IProcedureAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
 
-export class MysqlAdapter implements IAdapter {
+export class MysqlAdapter extends BaseAdapter implements ISchemaAdapter, IProcedureAdapter {
   private pool: mysql.Pool | null = null;
   private connected = false;
   private activeConn: mysql.PoolConnection | null = null;
 
-  constructor(private readonly config: ConnectionConfig) {}
+  constructor(private readonly config: ConnectionConfig) { super(); }
 
   async connect(): Promise<void> {
     this.pool = mysql.createPool({
@@ -33,24 +34,26 @@ export class MysqlAdapter implements IAdapter {
     }
   }
 
-  isConnected(): boolean {
-    return this.connected;
+  isConnected(): boolean { return this.connected; }
+
+  buildDefaultQuery(table: string, _schema?: string): string {
+    return `SELECT * FROM \`${table}\` LIMIT 150`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
-    if (!this.pool) throw new Error('Not connected');
-    const [rows] = await this.pool.query<mysql.RowDataPacket[]>('SHOW DATABASES');
+    this.assertConnected();
+    const [rows] = await this.pool!.query<mysql.RowDataPacket[]>('SHOW DATABASES');
     return rows.map((r) => ({ name: r.Database as string }));
   }
 
   async getTables(database: string): Promise<TableInfo[]> {
-    if (!this.pool) throw new Error('Not connected');
-    const [rows] = await this.pool.query<mysql.RowDataPacket[]>(
+    this.assertConnected();
+    const [rows] = await this.pool!.query<mysql.RowDataPacket[]>(
       `SELECT TABLE_NAME AS name, TABLE_TYPE AS type
        FROM information_schema.TABLES
        WHERE TABLE_SCHEMA = ?
        ORDER BY TABLE_TYPE, TABLE_NAME`,
-      [database]
+      [database],
     );
     return rows.map((r) => ({
       name: r.name as string,
@@ -59,13 +62,13 @@ export class MysqlAdapter implements IAdapter {
   }
 
   async getColumns(database: string, table: string): Promise<ColumnInfo[]> {
-    if (!this.pool) throw new Error('Not connected');
-    const [rows] = await this.pool.query<mysql.RowDataPacket[]>(
+    this.assertConnected();
+    const [rows] = await this.pool!.query<mysql.RowDataPacket[]>(
       `SELECT COLUMN_NAME AS name, DATA_TYPE AS type, IS_NULLABLE AS nullable
        FROM information_schema.COLUMNS
        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
        ORDER BY ORDINAL_POSITION`,
-      [database, table]
+      [database, table],
     );
     return rows.map((r) => ({
       name: r.name as string,
@@ -82,13 +85,11 @@ export class MysqlAdapter implements IAdapter {
   }
 
   async query(sql: string, database?: string): Promise<QueryResult> {
-    if (!this.pool) throw new Error('Not connected');
-    const conn = await this.pool.getConnection();
+    this.assertConnected();
+    const conn = await this.pool!.getConnection();
     this.activeConn = conn;
     try {
-      if (database) {
-        await conn.query(`USE \`${database}\``);
-      }
+      if (database) await conn.query(`USE \`${database}\``);
       const start = Date.now();
       const [rows, fields] = await conn.query(sql);
       const duration = Date.now() - start;
@@ -100,9 +101,7 @@ export class MysqlAdapter implements IAdapter {
         return { columns, rows: rows as mysql.RowDataPacket[], rowCount: rows.length, duration };
       }
 
-      // DML: UPDATE / INSERT / DELETE
       const ok = rows as mysql.OkPacket;
-
       return {
         columns: ['affected_rows', 'changed_rows', 'insert_id', 'info'],
         rows: [{
@@ -121,8 +120,8 @@ export class MysqlAdapter implements IAdapter {
   }
 
   async getTableDDL(database: string, table: string): Promise<string> {
-    if (!this.pool) throw new Error('Not connected');
-    const conn = await this.pool.getConnection();
+    this.assertConnected();
+    const conn = await this.pool!.getConnection();
     try {
       await conn.query(`USE \`${database}\``);
       const [rows] = await conn.query<mysql.RowDataPacket[]>(`SHOW CREATE TABLE \`${table}\``);
@@ -133,8 +132,8 @@ export class MysqlAdapter implements IAdapter {
   }
 
   async getProcedures(database: string): Promise<ProcedureInfo[]> {
-    if (!this.pool) throw new Error('Not connected');
-    const [rows] = await this.pool.query<mysql.RowDataPacket[]>(
+    this.assertConnected();
+    const [rows] = await this.pool!.query<mysql.RowDataPacket[]>(
       `SELECT ROUTINE_NAME AS name, ROUTINE_TYPE AS type
        FROM information_schema.ROUTINES
        WHERE ROUTINE_SCHEMA = ?
@@ -148,8 +147,8 @@ export class MysqlAdapter implements IAdapter {
   }
 
   async getPrimaryKeys(database: string, table: string): Promise<string[]> {
-    if (!this.pool) throw new Error('Not connected');
-    const [rows] = await this.pool.query<mysql.RowDataPacket[]>(
+    this.assertConnected();
+    const [rows] = await this.pool!.query<mysql.RowDataPacket[]>(
       `SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND CONSTRAINT_NAME = 'PRIMARY'
        ORDER BY ORDINAL_POSITION`,
@@ -159,11 +158,11 @@ export class MysqlAdapter implements IAdapter {
   }
 
   async updateCell(database: string, table: string, column: string, newValue: string | null, pkValues: Record<string, unknown>): Promise<void> {
-    if (!this.pool) throw new Error('Not connected');
+    this.assertConnected();
     const pkEntries = Object.entries(pkValues);
     const params: unknown[] = [newValue, ...pkEntries.map(([, v]) => v)];
     const where = pkEntries.map(([k]) => `\`${k}\` = ?`).join(' AND ');
-    const conn = await this.pool.getConnection();
+    const conn = await this.pool!.getConnection();
     try {
       await conn.query(`UPDATE \`${database}\`.\`${table}\` SET \`${column}\` = ? WHERE ${where}`, params);
     } finally {
@@ -172,15 +171,13 @@ export class MysqlAdapter implements IAdapter {
   }
 
   async getProcedureDefinition(database: string, name: string, type: 'procedure' | 'function'): Promise<string> {
-    if (!this.pool) throw new Error('Not connected');
+    this.assertConnected();
     const keyword = type === 'function' ? 'FUNCTION' : 'PROCEDURE';
     const col = type === 'function' ? 'Create Function' : 'Create Procedure';
-    const conn = await this.pool.getConnection();
+    const conn = await this.pool!.getConnection();
     try {
       await conn.query(`USE \`${database}\``);
-      const [rows] = await conn.query<mysql.RowDataPacket[]>(
-        `SHOW CREATE ${keyword} \`${name}\``,
-      );
+      const [rows] = await conn.query<mysql.RowDataPacket[]>(`SHOW CREATE ${keyword} \`${name}\``);
       return (rows[0]?.[col] as string) ?? '';
     } finally {
       conn.release();

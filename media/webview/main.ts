@@ -108,6 +108,32 @@ function init() {
     startCellEdit(td);
   });
 
+  // Event delegation for bookmark list — single listener survives re-renders
+  document.getElementById('bookmark-list')!.addEventListener('click', (e) => {
+    const item = (e.target as HTMLElement).closest('.bookmark-item') as HTMLElement | null;
+    if (!item) return;
+    const id = item.dataset.id!;
+    const bm = bookmarks.find((b) => b.id === id);
+    if (!bm) return;
+    const btn = (e.target as HTMLElement).closest('[data-action]') as HTMLElement | null;
+    if (btn) {
+      const action = btn.dataset.action;
+      if (action === 'copy') { copyText(bm.sql, btn); return; }
+      if (action === 'export') { doExportQuery(bm.sql, bm.name.replace(/[^a-z0-9_-]/gi, '_') || 'query'); return; }
+      if (action === 'delete') { vscode.postMessage({ type: 'deleteBookmark', id }); return; }
+    }
+    setEditorContent(bm.sql);
+    hide('bookmarks-panel');
+  });
+
+  // Event delegation for history list
+  document.getElementById('history-list')!.addEventListener('click', (e) => {
+    const item = (e.target as HTMLElement).closest('.history-item') as HTMLElement | null;
+    if (!item) return;
+    const entry = historyEntries.find((h) => h.id === item.dataset.id);
+    if (entry) { setEditorContent(entry.sql); hide('history-panel'); }
+  });
+
   setExportButtons(false);
   vscode.postMessage({ type: 'ready' });
 }
@@ -271,51 +297,18 @@ function confirmSave() {
 function updateBookmarks(items: Bookmark[]) {
   bookmarks = items;
   document.getElementById('bookmark-count')!.textContent = String(items.length);
-  const list = document.getElementById('bookmark-list')!;
-  if (!items.length) {
-    list.innerHTML = `<div class="bookmark-empty">No saved queries</div>`;
-    return;
-  }
-  list.innerHTML = items
-    .map((b) =>
-      `<div class="bookmark-item" data-id="${esc(b.id)}">
-        <span class="bookmark-item-name" title="${esc(b.sql)}">${esc(b.name)}</span>
-        <button class="bookmark-cpy" data-id="${esc(b.id)}" title="Copy SQL">📋</button>
-        <button class="bookmark-exp" data-id="${esc(b.id)}" title="Export">📤</button>
-        <button class="bookmark-del" data-id="${esc(b.id)}" title="Delete">✕</button>
-      </div>`)
-    .join('');
+  document.getElementById('bookmark-list')!.innerHTML = items.length
+    ? items.map(renderBookmarkItem).join('')
+    : `<div class="bookmark-empty">No saved queries</div>`;
+}
 
-  list.querySelectorAll('.bookmark-item').forEach((el) => {
-    el.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      if (target.classList.contains('bookmark-del') || target.classList.contains('bookmark-exp')) return;
-      const bm = bookmarks.find((b) => b.id === el.getAttribute('data-id'));
-      if (bm) { setEditorContent(bm.sql); hide('bookmarks-panel'); }
-    });
-  });
-  list.querySelectorAll('.bookmark-cpy').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const id = (btn as HTMLElement).getAttribute('data-id')!;
-      const bm = bookmarks.find((b) => b.id === id);
-      if (bm) copyText(bm.sql, btn as HTMLElement);
-    });
-  });
-  list.querySelectorAll('.bookmark-exp').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const id = (btn as HTMLElement).getAttribute('data-id')!;
-      const bm = bookmarks.find((b) => b.id === id);
-      if (bm) doExportQuery(bm.sql, bm.name.replace(/[^a-z0-9_-]/gi, '_') || 'query');
-    });
-  });
-  list.querySelectorAll('.bookmark-del').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      vscode.postMessage({ type: 'deleteBookmark', id: (btn as HTMLElement).getAttribute('data-id') });
-    });
-  });
+function renderBookmarkItem(b: Bookmark): string {
+  return `<div class="bookmark-item" data-id="${esc(b.id)}">
+    <span class="bookmark-item-name" title="${esc(b.sql)}">${esc(b.name)}</span>
+    <button class="bookmark-cpy" data-action="copy" title="Copy SQL">📋</button>
+    <button class="bookmark-exp" data-action="export" title="Export">📤</button>
+    <button class="bookmark-del" data-action="delete" title="Delete">✕</button>
+  </div>`;
 }
 
 // ── History ───────────────────────────────────────────────────────────────────
@@ -335,27 +328,16 @@ function updateHistory(items: HistoryEntry[]) {
   if (items.length === 0) historyIndex = -1;
   historyEntries = items;
   document.getElementById('history-count')!.textContent = String(items.length);
-  const list = document.getElementById('history-list')!;
-  if (!items.length) {
-    list.innerHTML = `<div class="history-empty">No history yet</div>`;
-    return;
-  }
-  list.innerHTML = items
-    .map(
-      (h) =>
-        `<div class="history-item" data-id="${esc(h.id)}">
-          <span class="history-sql" title="${esc(h.sql)}">${esc(h.sql.replace(/\s+/g, ' ').trim())}</span>
-          <span class="history-time">${relativeTime(h.executedAt)}</span>
-        </div>`,
-    )
-    .join('');
-  list.querySelectorAll('.history-item').forEach((el) => {
-    el.addEventListener('click', () => {
-      const id = el.getAttribute('data-id')!;
-      const entry = historyEntries.find((h) => h.id === id);
-      if (entry) { setEditorContent(entry.sql); hide('history-panel'); }
-    });
-  });
+  document.getElementById('history-list')!.innerHTML = items.length
+    ? items.map(renderHistoryItem).join('')
+    : `<div class="history-empty">No history yet</div>`;
+}
+
+function renderHistoryItem(h: HistoryEntry): string {
+  return `<div class="history-item" data-id="${esc(h.id)}">
+    <span class="history-sql" title="${esc(h.sql)}">${esc(h.sql.replace(/\s+/g, ' ').trim())}</span>
+    <span class="history-time">${relativeTime(h.executedAt)}</span>
+  </div>`;
 }
 
 function navigateHistory(dir: number) {

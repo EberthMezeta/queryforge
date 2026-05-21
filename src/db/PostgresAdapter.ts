@@ -1,13 +1,14 @@
 import { Client } from 'pg';
-import { IAdapter } from './IAdapter';
+import { BaseAdapter } from './BaseAdapter';
+import { ISchemaAdapter, IProcedureAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
 
-export class PostgresAdapter implements IAdapter {
+export class PostgresAdapter extends BaseAdapter implements ISchemaAdapter, IProcedureAdapter {
   private mainClient: Client | null = null;
   private sessionClients = new Map<string, Client>();
   private connected = false;
 
-  constructor(private readonly config: ConnectionConfig) {}
+  constructor(private readonly config: ConnectionConfig) { super(); }
 
   private clientConfig(database?: string) {
     return {
@@ -27,9 +28,7 @@ export class PostgresAdapter implements IAdapter {
   }
 
   async disconnect(): Promise<void> {
-    for (const c of this.sessionClients.values()) {
-      await c.end().catch(() => {});
-    }
+    for (const c of this.sessionClients.values()) await c.end().catch(() => {});
     this.sessionClients.clear();
     if (this.mainClient) {
       await this.mainClient.end();
@@ -38,13 +37,17 @@ export class PostgresAdapter implements IAdapter {
     }
   }
 
-  isConnected(): boolean {
-    return this.connected;
+  isConnected(): boolean { return this.connected; }
+
+  buildDefaultQuery(table: string, schema?: string): string {
+    return schema
+      ? `SELECT * FROM "${schema}"."${table}" LIMIT 150`
+      : `SELECT * FROM "${table}" LIMIT 150`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
-    if (!this.mainClient) throw new Error('Not connected');
-    const result = await this.mainClient.query(
+    this.assertConnected();
+    const result = await this.mainClient!.query(
       `SELECT datname AS name FROM pg_database WHERE datistemplate = false ORDER BY datname`,
     );
     return result.rows;
@@ -74,11 +77,7 @@ export class PostgresAdapter implements IAdapter {
        ORDER BY ordinal_position`,
       [schema, table],
     );
-    return result.rows.map((r) => ({
-      name: r.name,
-      type: r.type,
-      nullable: r.is_nullable === 'YES',
-    }));
+    return result.rows.map((r) => ({ name: r.name, type: r.type, nullable: r.is_nullable === 'YES' }));
   }
 
   async query(sql: string, database?: string): Promise<QueryResult> {
@@ -103,6 +102,15 @@ export class PostgresAdapter implements IAdapter {
     };
   }
 
+  async cancelQuery(database?: string): Promise<void> {
+    const db = database || this.config.database || 'postgres';
+    const client = this.sessionClients.get(db);
+    if (client) {
+      await client.end().catch(() => {});
+      this.sessionClients.delete(db);
+    }
+  }
+
   async getTableDDL(database: string, table: string, schema = 'public'): Promise<string> {
     const client = await this.getSessionClient(database);
     const result = await client.query(
@@ -120,15 +128,6 @@ export class PostgresAdapter implements IAdapter {
       [schema, table],
     );
     return (result.rows[0]?.ddl as string) ?? '';
-  }
-
-  async cancelQuery(database?: string): Promise<void> {
-    const db = database || this.config.database || 'postgres';
-    const client = this.sessionClients.get(db);
-    if (client) {
-      await client.end().catch(() => {});
-      this.sessionClients.delete(db);
-    }
   }
 
   async getProcedures(database: string): Promise<ProcedureInfo[]> {

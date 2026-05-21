@@ -1,12 +1,13 @@
 import { MongoClient, Db } from 'mongodb';
+import { BaseAdapter } from './BaseAdapter';
 import { IAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo } from '../types';
 
-export class MongoAdapter implements IAdapter {
+export class MongoAdapter extends BaseAdapter implements IAdapter {
   private client: MongoClient | null = null;
   private connected = false;
 
-  constructor(private readonly config: ConnectionConfig) {}
+  constructor(private readonly config: ConnectionConfig) { super(); }
 
   async connect(): Promise<void> {
     const uri = this.config.url || this.buildUri();
@@ -23,13 +24,15 @@ export class MongoAdapter implements IAdapter {
     }
   }
 
-  isConnected(): boolean {
-    return this.connected;
+  isConnected(): boolean { return this.connected; }
+
+  buildDefaultQuery(table: string, _schema?: string): string {
+    return `db.${table}.find({}).limit(150)`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
-    if (!this.client) throw new Error('Not connected');
-    const adminDb = this.client.db('admin');
+    this.assertConnected();
+    const adminDb = this.client!.db('admin');
     const { databases } = await adminDb.command({ listDatabases: 1, nameOnly: true });
     return (databases as Array<{ name: string }>)
       .filter((d) => !['admin', 'local', 'config'].includes(d.name))
@@ -37,8 +40,8 @@ export class MongoAdapter implements IAdapter {
   }
 
   async getTables(database: string): Promise<TableInfo[]> {
-    if (!this.client) throw new Error('Not connected');
-    const db: Db = this.client.db(database);
+    this.assertConnected();
+    const db: Db = this.client!.db(database);
     const collections = await db.listCollections().toArray();
     return collections.map((c) => ({
       name: c.name,
@@ -47,8 +50,8 @@ export class MongoAdapter implements IAdapter {
   }
 
   async getColumns(database: string, collection: string): Promise<ColumnInfo[]> {
-    if (!this.client) throw new Error('Not connected');
-    const doc = await this.client.db(database).collection(collection).findOne({});
+    this.assertConnected();
+    const doc = await this.client!.db(database).collection(collection).findOne({});
     if (!doc) return [];
     return Object.keys(doc).map((k) => ({
       name: k,
@@ -57,23 +60,20 @@ export class MongoAdapter implements IAdapter {
     }));
   }
 
-  // Accepts Mongo shell syntax: db.collection.find({filter}).limit(n)
   async query(queryStr: string, database?: string): Promise<QueryResult> {
-    if (!this.client) throw new Error('Not connected');
+    this.assertConnected();
     const start = Date.now();
 
     const match = queryStr.trim().match(/^db\.(\w+)\.find\(([\s\S]*?)\)(?:\.limit\((\d+)\))?$/);
     if (!match) {
-      throw new Error(
-        'Use MongoDB shell syntax:\n  db.collection.find({ field: value }).limit(150)',
-      );
+      throw new Error('Use MongoDB shell syntax:\n  db.collection.find({ field: value }).limit(150)');
     }
 
     const [, collection, filterStr, limitStr] = match;
     const filter = filterStr.trim() ? JSON.parse(filterStr) : {};
     const limit = parseInt(limitStr || '150') || 150;
 
-    const db = this.client.db(database);
+    const db = this.client!.db(database);
     const docs = await db.collection(collection).find(filter).limit(limit).toArray();
 
     const columns = docs.length > 0 ? Object.keys(docs[0]) : ['(empty)'];
@@ -85,7 +85,6 @@ export class MongoAdapter implements IAdapter {
       });
       return row;
     });
-
     return { columns, rows, rowCount: docs.length, duration: Date.now() - start };
   }
 

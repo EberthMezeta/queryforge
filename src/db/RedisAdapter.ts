@@ -1,12 +1,13 @@
 import { createClient, RedisClientType } from 'redis';
+import { BaseAdapter } from './BaseAdapter';
 import { IAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo } from '../types';
 
-export class RedisAdapter implements IAdapter {
+export class RedisAdapter extends BaseAdapter implements IAdapter {
   private client: RedisClientType | null = null;
   private connected = false;
 
-  constructor(private readonly config: ConnectionConfig) {}
+  constructor(private readonly config: ConnectionConfig) { super(); }
 
   async connect(): Promise<void> {
     this.client = createClient({
@@ -26,13 +27,15 @@ export class RedisAdapter implements IAdapter {
     }
   }
 
-  isConnected(): boolean {
-    return this.connected;
+  isConnected(): boolean { return this.connected; }
+
+  buildDefaultQuery(table: string, _schema?: string): string {
+    return `TYPE ${table}\nGET ${table}`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
-    if (!this.client) throw new Error('Not connected');
-    const info = await this.client.info('keyspace');
+    this.assertConnected();
+    const info = await this.client!.info('keyspace');
     const dbs: DatabaseInfo[] = [];
     const lines = info.split('\n').filter((l) => l.startsWith('db'));
     for (const line of lines) {
@@ -43,27 +46,26 @@ export class RedisAdapter implements IAdapter {
   }
 
   async getTables(database: string): Promise<TableInfo[]> {
-    if (!this.client) throw new Error('Not connected');
+    this.assertConnected();
     const dbNum = parseInt(database.replace('db:', '')) || 0;
-    await this.client.select(dbNum);
-    const keys = await this.client.keys('*');
+    await this.client!.select(dbNum);
+    const keys = await this.client!.keys('*');
     return keys.slice(0, 500).sort().map((k) => ({ name: k, type: 'table' as const }));
   }
 
   async getColumns(_database: string, key: string): Promise<ColumnInfo[]> {
-    if (!this.client) throw new Error('Not connected');
-    const type = await this.client.type(key);
+    this.assertConnected();
+    const type = await this.client!.type(key);
     return [{ name: 'key', type, nullable: false }];
   }
 
-  // Accepts Redis CLI commands, one per line
   async query(commands: string, database?: string): Promise<QueryResult> {
-    if (!this.client) throw new Error('Not connected');
+    this.assertConnected();
     const start = Date.now();
 
     if (database) {
       const dbNum = parseInt(database.replace('db:', '')) || 0;
-      await this.client.select(dbNum);
+      await this.client!.select(dbNum);
     }
 
     const lines = commands.trim().split('\n').map((l) => l.trim()).filter(Boolean);

@@ -1,4 +1,4 @@
-import { ConnectionConfig } from '../types';
+import { ConnectionConfig, DbType } from '../types';
 import { IAdapter } from './IAdapter';
 import { PostgresAdapter } from './PostgresAdapter';
 import { MysqlAdapter } from './MysqlAdapter';
@@ -9,18 +9,24 @@ import { MongoAdapter } from './MongoAdapter';
 import { RedisAdapter } from './RedisAdapter';
 import { GraphQLAdapter } from './GraphQLAdapter';
 
+type AdapterFactory = (config: ConnectionConfig) => IAdapter;
+
+const ADAPTER_REGISTRY: Record<DbType, AdapterFactory> = {
+  postgres: (c) => new PostgresAdapter(c),
+  mysql:    (c) => new MysqlAdapter(c),
+  sqlite:   (c) => new SqliteAdapter(c),
+  mssql:    (c) => new SqlServerAdapter(c),
+  oracle:   (c) => new OracleAdapter(c),
+  mongodb:  (c) => new MongoAdapter(c),
+  redis:    (c) => new RedisAdapter(c),
+  graphql:  (c) => new GraphQLAdapter(c),
+};
+
 export function createAdapter(config: ConnectionConfig): IAdapter {
-  switch (config.type) {
-    case 'postgres': return new PostgresAdapter(config);
-    case 'mysql':    return new MysqlAdapter(config);
-    case 'sqlite':   return new SqliteAdapter(config);
-    case 'mssql':    return new SqlServerAdapter(config);
-    case 'oracle':   return new OracleAdapter(config);
-    case 'mongodb':  return new MongoAdapter(config);
-    case 'redis':    return new RedisAdapter(config);
-    case 'graphql':  return new GraphQLAdapter(config);
-    default: throw new Error(`Unsupported database type: ${(config as ConnectionConfig).type}`);
-  }
+  const factory = ADAPTER_REGISTRY[config.type];
+  if (!factory) throw new Error(`Unsupported database type: ${config.type}`);
+  return factory(config);
 }
 
 export { IAdapter };
+export { isSchemaAdapter, isProcedureAdapter } from './IAdapter';

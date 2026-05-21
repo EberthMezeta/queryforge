@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ConnectionStorage } from '../storage/ConnectionStorage';
-import { createAdapter, IAdapter } from '../db/index';
+import { createAdapter, IAdapter, isProcedureAdapter } from '../db/index';
 import { ConnectionConfig, ProcedureInfo } from '../types';
 import {
   ConnectionItem,
@@ -69,7 +69,7 @@ export class ConnectionsProvider implements vscode.TreeDataProvider<AnyItem> {
 
         // Collect procedures upfront (needed to detect multi-schema)
         let procs: ProcedureInfo[] = [];
-        if (element.adapter.getProcedures) {
+        if (isProcedureAdapter(element.adapter)) {
           try { procs = await element.adapter.getProcedures(element.database); } catch { /* non-critical */ }
         }
 

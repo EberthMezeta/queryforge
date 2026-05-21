@@ -1,14 +1,15 @@
 import initSqlJs, { Database } from 'sql.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import { IAdapter } from './IAdapter';
+import { BaseAdapter } from './BaseAdapter';
+import { ISchemaAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo } from '../types';
 
-export class SqliteAdapter implements IAdapter {
+export class SqliteAdapter extends BaseAdapter implements ISchemaAdapter {
   private db: Database | null = null;
   private connected = false;
 
-  constructor(private readonly config: ConnectionConfig) {}
+  constructor(private readonly config: ConnectionConfig) { super(); }
 
   async connect(): Promise<void> {
     if (!this.config.filename) throw new Error('SQLite filename is required');
@@ -27,8 +28,10 @@ export class SqliteAdapter implements IAdapter {
     }
   }
 
-  isConnected(): boolean {
-    return this.connected;
+  isConnected(): boolean { return this.connected; }
+
+  buildDefaultQuery(table: string, _schema?: string): string {
+    return `SELECT * FROM "${table}" LIMIT 150`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
@@ -38,8 +41,8 @@ export class SqliteAdapter implements IAdapter {
   }
 
   async getTables(_database: string): Promise<TableInfo[]> {
-    if (!this.db) throw new Error('Not connected');
-    const result = this.db.exec(`
+    this.assertConnected();
+    const result = this.db!.exec(`
       SELECT name, type FROM sqlite_master
       WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'
       ORDER BY type, name
@@ -52,10 +55,9 @@ export class SqliteAdapter implements IAdapter {
   }
 
   async getColumns(_database: string, table: string): Promise<ColumnInfo[]> {
-    if (!this.db) throw new Error('Not connected');
-    const result = this.db.exec(`PRAGMA table_info("${table.replace(/"/g, '""')}")`);
+    this.assertConnected();
+    const result = this.db!.exec(`PRAGMA table_info("${table.replace(/"/g, '""')}")`);
     if (!result.length) return [];
-    // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
     return result[0].values.map((row) => ({
       name: row[1] as string,
       type: (row[2] as string) || 'TEXT',
@@ -63,19 +65,41 @@ export class SqliteAdapter implements IAdapter {
     }));
   }
 
+  async query(sql: string, _database?: string): Promise<QueryResult> {
+    this.assertConnected();
+    const start = Date.now();
+    const results = this.db!.exec(sql);
+    const duration = Date.now() - start;
+
+    if (!results.length) {
+      const affected = this.db!.getRowsModified();
+      if (this.config.filename) {
+        fs.writeFileSync(this.config.filename, Buffer.from(this.db!.export()));
+      }
+      return this.dmlResult(affected, duration);
+    }
+
+    const { columns, values } = results[0];
+    const rows = values.map((row) => {
+      const obj: Record<string, unknown> = {};
+      columns.forEach((col, i) => { obj[col] = row[i]; });
+      return obj;
+    });
+    return { columns, rows, rowCount: rows.length, duration };
+  }
+
   async getTableDDL(_database: string, table: string): Promise<string> {
-    if (!this.db) throw new Error('Not connected');
-    const result = this.db.exec(
+    this.assertConnected();
+    const result = this.db!.exec(
       `SELECT sql FROM sqlite_master WHERE name = '${table.replace(/'/g, "''")}' LIMIT 1`,
     );
     return (result[0]?.values[0]?.[0] as string) ?? '';
   }
 
   async getPrimaryKeys(_database: string, table: string): Promise<string[]> {
-    if (!this.db) throw new Error('Not connected');
-    const result = this.db.exec(`PRAGMA table_info("${table.replace(/"/g, '""')}")`);
+    this.assertConnected();
+    const result = this.db!.exec(`PRAGMA table_info("${table.replace(/"/g, '""')}")`);
     if (!result.length) return [];
-    // columns: cid, name, type, notnull, dflt_value, pk
     return result[0].values
       .filter((row) => (row[5] as number) > 0)
       .sort((a, b) => (a[5] as number) - (b[5] as number))
@@ -88,36 +112,5 @@ export class SqliteAdapter implements IAdapter {
       .map(([k, v]) => `"${k.replace(/"/g, '""')}" = ${v === null ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`}`)
       .join(' AND ');
     await this.query(`UPDATE "${table.replace(/"/g, '""')}" SET "${column.replace(/"/g, '""')}" = ${val} WHERE ${where}`);
-  }
-
-  async query(sql: string, _database?: string): Promise<QueryResult> {
-    if (!this.db) throw new Error('Not connected');
-    const start = Date.now();
-    const results = this.db.exec(sql);
-    const duration = Date.now() - start;
-
-    if (!results.length) {
-      const affected = this.db.getRowsModified();
-      // Persist any structural or data changes back to the file
-      if (this.config.filename) {
-        const data = this.db.export();
-        fs.writeFileSync(this.config.filename, Buffer.from(data));
-      }
-      return {
-        columns: ['affected_rows', 'status'],
-        rows: [{ affected_rows: affected, status: 'Query OK' }],
-        rowCount: affected,
-        duration,
-      };
-    }
-
-    const { columns, values } = results[0];
-    const rows = values.map((row) => {
-      const obj: Record<string, unknown> = {};
-      columns.forEach((col, i) => { obj[col] = row[i]; });
-      return obj;
-    });
-
-    return { columns, rows, rowCount: rows.length, duration };
   }
 }
