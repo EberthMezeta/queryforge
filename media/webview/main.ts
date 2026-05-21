@@ -71,6 +71,7 @@ function init() {
     renderPage();
   });
 
+  document.getElementById('btn-export-query')!.addEventListener('click', exportQuery);
   document.getElementById('btn-save-query')!.addEventListener('click', openSaveForm);
   document.getElementById('btn-bookmarks')!.addEventListener('click', toggleBookmarksPanel);
   document.getElementById('bookmark-confirm')!.addEventListener('click', confirmSave);
@@ -238,15 +239,25 @@ function updateBookmarks(items: Bookmark[]) {
     .map((b) =>
       `<div class="bookmark-item" data-id="${esc(b.id)}">
         <span class="bookmark-item-name" title="${esc(b.sql)}">${esc(b.name)}</span>
+        <button class="bookmark-exp" data-id="${esc(b.id)}" title="Export">📤</button>
         <button class="bookmark-del" data-id="${esc(b.id)}" title="Delete">✕</button>
       </div>`)
     .join('');
 
   list.querySelectorAll('.bookmark-item').forEach((el) => {
     el.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).classList.contains('bookmark-del')) return;
+      const target = e.target as HTMLElement;
+      if (target.classList.contains('bookmark-del') || target.classList.contains('bookmark-exp')) return;
       const bm = bookmarks.find((b) => b.id === el.getAttribute('data-id'));
       if (bm) { setEditorContent(bm.sql); hide('bookmarks-panel'); }
+    });
+  });
+  list.querySelectorAll('.bookmark-exp').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = (btn as HTMLElement).getAttribute('data-id')!;
+      const bm = bookmarks.find((b) => b.id === id);
+      if (bm) doExportQuery(bm.sql, bm.name.replace(/[^a-z0-9_-]/gi, '_') || 'query');
     });
   });
   list.querySelectorAll('.bookmark-del').forEach((btn) => {
@@ -255,6 +266,36 @@ function updateBookmarks(items: Bookmark[]) {
       vscode.postMessage({ type: 'deleteBookmark', id: (btn as HTMLElement).getAttribute('data-id') });
     });
   });
+}
+
+// ── Export Query ──────────────────────────────────────────────────────────────
+
+function exportQuery() {
+  const sqlText = editor.state.doc.toString().trim();
+  if (!sqlText) return;
+  doExportQuery(sqlText, 'query');
+}
+
+function doExportQuery(sqlText: string, baseName: string) {
+  const fmt = (document.getElementById('export-query-fmt') as HTMLSelectElement).value;
+  if (fmt === 'sql') {
+    download(sqlText, `${baseName}.sql`, 'text/plain');
+  } else if (fmt === 'txt') {
+    download(sqlText, `${baseName}.txt`, 'text/plain');
+  } else if (fmt === 'md') {
+    download('```sql\n' + sqlText + '\n```\n', `${baseName}.md`, 'text/markdown');
+  } else if (fmt === 'pdf') {
+    exportQueryPDF(sqlText, baseName);
+  }
+}
+
+function exportQueryPDF(sqlText: string, baseName = 'query') {
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setFont('Courier', 'normal');
+  doc.setFontSize(10);
+  const lines = doc.splitTextToSize(sqlText, 515);
+  doc.text(lines, 40, 40);
+  doc.save(`${baseName}.pdf`);
 }
 
 // ── Export (uses filtered rows) ───────────────────────────────────────────────

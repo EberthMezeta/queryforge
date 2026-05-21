@@ -69,7 +69,11 @@ export class QueryPanel {
   private async handleMessage(msg: WebviewMessage): Promise<void> {
     if (msg.type === 'ready') {
       if (this.pendingInit) {
-        this.send({ type: 'init', ...this.pendingInit, bookmarks: this.bookmarks.getAll() });
+        this.send({
+          type: 'init',
+          ...this.pendingInit,
+          bookmarks: this.bookmarks.getAll(this.config.id, this.database),
+        });
         this.pendingInit = null;
         this.loadSchemaAsync(this.database);
       }
@@ -88,12 +92,14 @@ export class QueryPanel {
     }
 
     if (msg.type === 'saveBookmark' && msg.name && msg.sql) {
-      this.send({ type: 'bookmarks', items: this.bookmarks.add(msg.name, msg.sql) });
+      const items = this.bookmarks.add(this.config.id, this.database, msg.name, msg.sql);
+      this.send({ type: 'bookmarks', items });
       return;
     }
 
     if (msg.type === 'deleteBookmark' && msg.id) {
-      this.send({ type: 'bookmarks', items: this.bookmarks.delete(msg.id) });
+      const items = this.bookmarks.delete(this.config.id, this.database, msg.id);
+      this.send({ type: 'bookmarks', items });
       return;
     }
   }
@@ -151,6 +157,15 @@ export class QueryPanel {
     <div class="toolbar-right">
       <button id="btn-save-query" class="btn btn-sm" title="Save current query">⭐ Save</button>
       <button id="btn-bookmarks" class="btn btn-sm" title="Saved queries">☰ <span id="bookmark-count">0</span></button>
+      <div class="export-query-wrap">
+        <select id="export-query-fmt" title="Export format">
+          <option value="sql">.sql</option>
+          <option value="txt">.txt</option>
+          <option value="md">.md</option>
+          <option value="pdf">PDF</option>
+        </select>
+        <button id="btn-export-query" class="btn btn-sm" title="Export current query">📤 Export Query</button>
+      </div>
       <div class="toolbar-divider"></div>
       <label class="limit-label">LIMIT
         <input type="number" id="limit-input" value="150" min="1" max="100000">
@@ -239,6 +254,16 @@ body{
 .sep{color:var(--vscode-descriptionForeground)}
 .toolbar-right{display:flex;align-items:center;gap:8px}
 .toolbar-divider{width:1px;height:16px;background:var(--vscode-panel-border);margin:0 2px}
+.export-query-wrap{display:flex;align-items:center;gap:0}
+#export-query-fmt{
+  background:var(--vscode-button-secondaryBackground);
+  color:var(--vscode-button-secondaryForeground);
+  border:none;border-radius:3px 0 0 3px;
+  padding:3px 6px;font-size:11px;cursor:pointer;
+  border-right:1px solid var(--vscode-panel-border);
+}
+#export-query-fmt:focus{outline:none}
+#btn-export-query{border-radius:0 3px 3px 0}
 .limit-label{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--vscode-descriptionForeground)}
 #limit-input{
   width:72px;background:var(--vscode-input-background);
@@ -269,7 +294,8 @@ body{
 }
 .bookmark-item:hover{background:var(--vscode-list-hoverBackground)}
 .bookmark-item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bookmark-del{background:none;border:none;cursor:pointer;color:var(--vscode-descriptionForeground);font-size:14px;line-height:1;padding:0 2px;opacity:0.6}
+.bookmark-exp,.bookmark-del{background:none;border:none;cursor:pointer;color:var(--vscode-descriptionForeground);font-size:13px;line-height:1;padding:0 2px;opacity:0.55;flex-shrink:0}
+.bookmark-exp:hover{opacity:1}
 .bookmark-del:hover{opacity:1;color:var(--vscode-errorForeground)}
 .bookmark-empty{padding:14px 12px;color:var(--vscode-descriptionForeground);font-size:12px;text-align:center}
 #editor-wrap{flex-shrink:0;border-bottom:1px solid var(--vscode-panel-border)}

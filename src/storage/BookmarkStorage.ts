@@ -8,29 +8,31 @@ export interface Bookmark {
 }
 
 export class BookmarkStorage {
-  private static readonly KEY = 'dbConnection.bookmarks';
-
   constructor(private readonly context: vscode.ExtensionContext) {}
 
-  getAll(): Bookmark[] {
-    return this.context.globalState.get<Bookmark[]>(BookmarkStorage.KEY, []);
+  private key(connectionId: string, database: string): string {
+    return `dbConnection.bookmarks.${connectionId}.${database}`;
   }
 
-  add(name: string, sql: string): Bookmark[] {
+  getAll(connectionId: string, database: string): Bookmark[] {
+    return this.context.globalState.get<Bookmark[]>(this.key(connectionId, database), []);
+  }
+
+  add(connectionId: string, database: string, name: string, sql: string): Bookmark[] {
     const bookmark: Bookmark = {
       id: Date.now().toString(),
       name: name.trim(),
       sql,
       createdAt: Date.now(),
     };
-    const all = [bookmark, ...this.getAll()];
-    this.context.globalState.update(BookmarkStorage.KEY, all);
+    const all = [bookmark, ...this.getAll(connectionId, database)];
+    this.context.globalState.update(this.key(connectionId, database), all);
     return all;
   }
 
-  delete(id: string): Bookmark[] {
-    const all = this.getAll().filter((b) => b.id !== id);
-    this.context.globalState.update(BookmarkStorage.KEY, all);
+  delete(connectionId: string, database: string, id: string): Bookmark[] {
+    const all = this.getAll(connectionId, database).filter((b) => b.id !== id);
+    this.context.globalState.update(this.key(connectionId, database), all);
     return all;
   }
 }
