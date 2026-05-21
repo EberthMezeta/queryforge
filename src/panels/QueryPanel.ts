@@ -113,13 +113,13 @@ export class QueryPanel {
 
     if (msg.type === 'clearHistory') {
       this.historyStorage.clear(this.config.id, this.database);
-      this.send({ type: 'history', items: [] });
+      this.broadcastHistory([]);
       return;
     }
 
     if (msg.type === 'runQuery' && msg.sql) {
       const historyItems = this.historyStorage.push(this.config.id, this.database, msg.sql);
-      this.send({ type: 'history', items: historyItems });
+      this.broadcastHistory(historyItems);
       this.send({ type: 'loading' });
       this.runningDatabase = msg.database;
       let cancelled = false;
@@ -149,13 +149,13 @@ export class QueryPanel {
 
     if (msg.type === 'saveBookmark' && msg.name && msg.sql) {
       const items = this.bookmarks.add(this.config.id, this.database, msg.name, msg.sql);
-      this.send({ type: 'bookmarks', items });
+      this.broadcastBookmarks(items);
       return;
     }
 
     if (msg.type === 'deleteBookmark' && msg.id) {
       const items = this.bookmarks.delete(this.config.id, this.database, msg.id);
-      this.send({ type: 'bookmarks', items });
+      this.broadcastBookmarks(items);
       return;
     }
   }
@@ -180,6 +180,22 @@ export class QueryPanel {
 
   private send(data: Record<string, unknown>): void {
     this.panel.webview.postMessage(data);
+  }
+
+  private broadcastBookmarks(items: unknown[]): void {
+    for (const panel of QueryPanel.panels.values()) {
+      if (panel.config.id === this.config.id && panel.database === this.database) {
+        panel.send({ type: 'bookmarks', items });
+      }
+    }
+  }
+
+  private broadcastHistory(items: unknown[]): void {
+    for (const panel of QueryPanel.panels.values()) {
+      if (panel.config.id === this.config.id && panel.database === this.database) {
+        panel.send({ type: 'history', items });
+      }
+    }
   }
 
   private buildHtml(): string {

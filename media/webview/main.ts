@@ -319,6 +319,7 @@ function toggleHistoryPanel() {
 }
 
 function updateHistory(items: HistoryEntry[]) {
+  if (items.length === 0) historyIndex = -1;
   historyEntries = items;
   document.getElementById('history-count')!.textContent = String(items.length);
   const list = document.getElementById('history-list')!;
