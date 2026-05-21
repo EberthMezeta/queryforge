@@ -1,0 +1,92 @@
+import * as vscode from 'vscode';
+import { ConnectionStorage } from './storage/ConnectionStorage';
+import { ConnectionsProvider } from './tree/ConnectionsProvider';
+import { QueryPanel } from './panels/QueryPanel';
+import { AddConnectionPanel } from './panels/AddConnectionPanel';
+import { ConnectionItem, DatabaseItem, TableItem } from './tree/TreeItems';
+import { DbType } from './types';
+
+export function activate(context: vscode.ExtensionContext): void {
+  const storage = new ConnectionStorage(context);
+  const provider = new ConnectionsProvider(storage);
+
+  vscode.window.registerTreeDataProvider('dbConnection.connections', provider);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('dbConnection.addConnection', () =>
+      AddConnectionPanel.show(storage, provider),
+    ),
+
+    vscode.commands.registerCommand('dbConnection.refreshConnections', () => provider.refresh()),
+
+    vscode.commands.registerCommand(
+      'dbConnection.deleteConnection',
+      async (item: ConnectionItem) => {
+        const answer = await vscode.window.showWarningMessage(
+          `Delete connection "${item.config.name}"?`,
+          { modal: true },
+          'Delete',
+        );
+        if (answer !== 'Delete') return;
+        await provider.disconnect(item.config.id);
+        await storage.deleteConnection(item.config.id);
+        provider.refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      'dbConnection.disconnectConnection',
+      async (item: ConnectionItem) => {
+        await provider.disconnect(item.config.id);
+        provider.refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand('dbConnection.testConnection', async (item: ConnectionItem) => {
+      vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Testing "${item.config.name}"…` },
+        async () => {
+          try {
+            await provider.getOrConnect(item.config);
+            provider.refresh();
+            vscode.window.showInformationMessage(`✓ Connected to "${item.config.name}"`);
+          } catch (err: unknown) {
+            vscode.window.showErrorMessage(
+              `✗ Connection failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        },
+      );
+    }),
+
+    vscode.commands.registerCommand('dbConnection.openTable', (item: TableItem) => {
+      const sql = buildSelectQuery(item.table, item.config.type);
+      QueryPanel.createOrShow(
+        context,
+        item.config,
+        item.database,
+        sql,
+        item.adapter,
+        true,
+      );
+    }),
+
+    vscode.commands.registerCommand('dbConnection.openQueryEditor', (item: DatabaseItem) => {
+      QueryPanel.createOrShow(context, item.config, item.database, '', item.adapter, false);
+    }),
+  );
+}
+
+export function deactivate(): void {}
+
+function buildSelectQuery(table: string, dbType: DbType): string {
+  switch (dbType) {
+    case 'mysql':    return `SELECT * FROM \`${table}\` LIMIT 150`;
+    case 'mssql':    return `SELECT TOP 150 * FROM [${table}]`;
+    case 'oracle':   return `SELECT * FROM "${table}" FETCH FIRST 150 ROWS ONLY`;
+    case 'mongodb':  return `db.${table}.find({}).limit(150)`;
+    case 'redis':    return `TYPE ${table}\nGET ${table}`;
+    case 'graphql':  return `{\n  ${table} {\n    id\n  }\n}`;
+    default:         return `SELECT * FROM "${table}" LIMIT 150`;
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "name": "db-connection",
+  "displayName": "DB Connection",
+  "description": "Visual database manager – browse connections, query tables, export results",
+  "version": "0.1.0",
+  "publisher": "db-connection",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "db-connection",
+          "title": "DB Connection",
+          "icon": "resources/database.svg"
+        }
+      ]
+    },
+    "views": {
+      "db-connection": [
+        {
+          "id": "dbConnection.connections",
+          "name": "Connections"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "dbConnection.addConnection",
+        "title": "Add Connection",
+        "icon": "$(add)",
+        "category": "DB Connection"
+      },
+      {
+        "command": "dbConnection.refreshConnections",
+        "title": "Refresh",
+        "icon": "$(refresh)",
+        "category": "DB Connection"
+      },
+      {
+        "command": "dbConnection.deleteConnection",
+        "title": "Delete Connection",
+        "icon": "$(trash)",
+        "category": "DB Connection"
+      },
+      {
+        "command": "dbConnection.testConnection",
+        "title": "Test Connection",
+        "icon": "$(plug)",
+        "category": "DB Connection"
+      },
+      {
+        "command": "dbConnection.openTable",
+        "title": "Open Table",
+        "icon": "$(table)",
+        "category": "DB Connection"
+      },
+      {
+        "command": "dbConnection.openQueryEditor",
+        "title": "New Query",
+        "icon": "$(new-file)",
+        "category": "DB Connection"
+      },
+      {
+        "command": "dbConnection.disconnectConnection",
+        "title": "Disconnect",
+        "icon": "$(debug-disconnect)",
+        "category": "DB Connection"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "dbConnection.addConnection",
+          "when": "view == dbConnection.connections",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dbConnection.refreshConnections",
+          "when": "view == dbConnection.connections",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "dbConnection.testConnection",
+          "when": "viewItem == connection",
+          "group": "inline@1"
+        },
+        {
+          "command": "dbConnection.disconnectConnection",
+          "when": "viewItem == connection-connected",
+          "group": "inline@2"
+        },
+        {
+          "command": "dbConnection.deleteConnection",
+          "when": "viewItem == connection || viewItem == connection-connected",
+          "group": "inline@3"
+        },
+        {
+          "command": "dbConnection.openQueryEditor",
+          "when": "viewItem == database",
+          "group": "inline"
+        },
+        {
+          "command": "dbConnection.openTable",
+          "when": "viewItem == table || viewItem == view",
+          "group": "inline"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@codemirror/commands": "^6.3.3",
+    "@codemirror/lang-sql": "^6.6.0",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.25.1",
+    "@types/mssql": "^12.3.0",
+    "@types/node": "^20.11.0",
+    "@types/pg": "^8.11.3",
+    "@types/sql.js": "^1.4.9",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.2",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "mongodb": "^7.2.0",
+    "mssql": "^12.5.4",
+    "mysql2": "^3.9.2",
+    "oracledb": "^6.10.0",
+    "pg": "^8.11.3",
+    "redis": "^5.12.1",
+    "sql.js": "^1.12.0"
+  }
+}
