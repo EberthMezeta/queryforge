@@ -71,6 +71,11 @@ export class SqliteAdapter implements IAdapter {
 
     if (!results.length) {
       const affected = this.db.getRowsModified();
+      // Persist any structural or data changes back to the file
+      if (this.config.filename) {
+        const data = this.db.export();
+        fs.writeFileSync(this.config.filename, Buffer.from(data));
+      }
       return {
         columns: ['affected_rows', 'status'],
         rows: [{ affected_rows: affected, status: 'Query OK' }],

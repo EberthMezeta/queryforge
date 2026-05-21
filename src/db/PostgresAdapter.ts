@@ -1,30 +1,39 @@
 import { Client } from 'pg';
 import { IAdapter } from './IAdapter';
-import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo } from '../types';
+import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
 
 export class PostgresAdapter implements IAdapter {
-  private client: Client | null = null;
+  private mainClient: Client | null = null;
+  private sessionClients = new Map<string, Client>();
   private connected = false;
 
   constructor(private readonly config: ConnectionConfig) {}
 
-  async connect(): Promise<void> {
-    this.client = new Client({
+  private clientConfig(database?: string) {
+    return {
       host: this.config.host || '127.0.0.1',
       port: this.config.port || 5432,
       user: this.config.user,
       password: this.config.password,
-      database: this.config.database || 'postgres',
+      database: database || this.config.database || 'postgres',
       connectionTimeoutMillis: 10000,
-    });
-    await this.client.connect();
+    };
+  }
+
+  async connect(): Promise<void> {
+    this.mainClient = new Client(this.clientConfig());
+    await this.mainClient.connect();
     this.connected = true;
   }
 
   async disconnect(): Promise<void> {
-    if (this.client) {
-      await this.client.end();
-      this.client = null;
+    for (const c of this.sessionClients.values()) {
+      await c.end().catch(() => {});
+    }
+    this.sessionClients.clear();
+    if (this.mainClient) {
+      await this.mainClient.end();
+      this.mainClient = null;
       this.connected = false;
     }
   }
@@ -34,83 +43,99 @@ export class PostgresAdapter implements IAdapter {
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
-    if (!this.client) throw new Error('Not connected');
-    const result = await this.client.query(
-      `SELECT datname AS name FROM pg_database
-       WHERE datistemplate = false ORDER BY datname`
+    if (!this.mainClient) throw new Error('Not connected');
+    const result = await this.mainClient.query(
+      `SELECT datname AS name FROM pg_database WHERE datistemplate = false ORDER BY datname`,
     );
     return result.rows;
   }
 
   async getTables(database: string): Promise<TableInfo[]> {
-    return this.withDb(database, async (client) => {
-      const result = await client.query(`
-        SELECT table_name AS name, table_type
-        FROM information_schema.tables
-        WHERE table_schema = 'public'
-        ORDER BY table_type, table_name
-      `);
-      return result.rows.map((r) => ({
-        name: r.name,
-        type: r.table_type === 'VIEW' ? 'view' : 'table',
-      })) as TableInfo[];
-    });
+    const client = await this.getSessionClient(database);
+    const result = await client.query(`
+      SELECT table_name AS name, table_type
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+      ORDER BY table_type, table_name
+    `);
+    return result.rows.map((r) => ({
+      name: r.name,
+      type: r.table_type === 'VIEW' ? 'view' : 'table',
+    })) as TableInfo[];
   }
 
   async getColumns(database: string, table: string): Promise<ColumnInfo[]> {
-    return this.withDb(database, async (client) => {
-      const result = await client.query(
-        `SELECT column_name AS name, data_type AS type, is_nullable
-         FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = $1
-         ORDER BY ordinal_position`,
-        [table]
-      );
-      return result.rows.map((r) => ({
-        name: r.name,
-        type: r.type,
-        nullable: r.is_nullable === 'YES',
-      }));
-    });
+    const client = await this.getSessionClient(database);
+    const result = await client.query(
+      `SELECT column_name AS name, data_type AS type, is_nullable
+       FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = $1
+       ORDER BY ordinal_position`,
+      [table],
+    );
+    return result.rows.map((r) => ({
+      name: r.name,
+      type: r.type,
+      nullable: r.is_nullable === 'YES',
+    }));
   }
 
   async query(sql: string, database?: string): Promise<QueryResult> {
     const db = database || this.config.database || 'postgres';
-    return this.withDb(db, async (client) => {
-      const start = Date.now();
-      const result = await client.query(sql);
-      if (!result.fields?.length) {
-        const affected = result.rowCount ?? 0;
-        return {
-          columns: ['affected_rows', 'command'],
-          rows: [{ affected_rows: affected, command: result.command ?? 'OK' }],
-          rowCount: affected,
-          duration: Date.now() - start,
-        };
-      }
+    const client = await this.getSessionClient(db);
+    const start = Date.now();
+    const result = await client.query(sql);
+    if (!result.fields?.length) {
+      const affected = result.rowCount ?? 0;
       return {
-        columns: result.fields.map((f) => f.name),
-        rows: result.rows ?? [],
-        rowCount: result.rowCount ?? result.rows?.length ?? 0,
+        columns: ['affected_rows', 'command'],
+        rows: [{ affected_rows: affected, command: result.command ?? 'OK' }],
+        rowCount: affected,
         duration: Date.now() - start,
       };
-    });
+    }
+    return {
+      columns: result.fields.map((f) => f.name),
+      rows: result.rows ?? [],
+      rowCount: result.rowCount ?? result.rows?.length ?? 0,
+      duration: Date.now() - start,
+    };
   }
 
-  private async withDb<T>(database: string, fn: (client: Client) => Promise<T>): Promise<T> {
-    const client = new Client({
-      host: this.config.host || '127.0.0.1',
-      port: this.config.port || 5432,
-      user: this.config.user,
-      password: this.config.password,
-      database,
-      connectionTimeoutMillis: 10000,
-    });
-    await client.connect();
-    try {
-      return await fn(client);
-    } finally {
-      await client.end();
+  async getProcedures(database: string): Promise<ProcedureInfo[]> {
+    const client = await this.getSessionClient(database);
+    const result = await client.query(`
+      SELECT routine_name AS name, routine_type AS type
+      FROM information_schema.routines
+      WHERE routine_schema = 'public'
+      ORDER BY routine_type, routine_name
+    `);
+    return result.rows.map((r) => ({
+      name: r.name as string,
+      type: (r.type as string) === 'FUNCTION' ? 'function' : 'procedure',
+    })) as ProcedureInfo[];
+  }
+
+  async getProcedureDefinition(database: string, name: string): Promise<string> {
+    const client = await this.getSessionClient(database);
+    const result = await client.query(
+      `SELECT pg_get_functiondef(p.oid) AS def
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = $1
+       LIMIT 1`,
+      [name],
+    );
+    return (result.rows[0]?.def as string) ?? '';
+  }
+
+  private async getSessionClient(database: string): Promise<Client> {
+    let client = this.sessionClients.get(database);
+    if (!client) {
+      client = new Client(this.clientConfig(database));
+      await client.connect();
+      this.sessionClients.set(database, client);
     }
+    return client;
   }
 }

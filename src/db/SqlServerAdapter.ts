@@ -1,6 +1,6 @@
 import * as mssql from 'mssql';
 import { IAdapter } from './IAdapter';
-import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo } from '../types';
+import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
 
 export class SqlServerAdapter implements IAdapter {
   private pool: mssql.ConnectionPool | null = null;
@@ -97,5 +97,27 @@ export class SqlServerAdapter implements IAdapter {
       rowCount: affected || rs.length,
       duration: Date.now() - start,
     };
+  }
+
+  async getProcedures(database: string): Promise<ProcedureInfo[]> {
+    if (!this.pool) throw new Error('Not connected');
+    const result = await this.pool.request().query(`
+      SELECT ROUTINE_NAME AS name, ROUTINE_TYPE AS type
+      FROM [${database}].INFORMATION_SCHEMA.ROUTINES
+      WHERE ROUTINE_SCHEMA = 'dbo'
+      ORDER BY ROUTINE_TYPE, ROUTINE_NAME
+    `);
+    return result.recordset.map((r) => ({
+      name: r.name as string,
+      type: (r.type as string).trim() === 'FUNCTION' ? 'function' : 'procedure',
+    })) as ProcedureInfo[];
+  }
+
+  async getProcedureDefinition(database: string, name: string): Promise<string> {
+    if (!this.pool) throw new Error('Not connected');
+    const result = await this.pool.request().query(
+      `SELECT OBJECT_DEFINITION(OBJECT_ID('[${database}].[dbo].[${name.replace(/]/g, ']]')}]')) AS def`,
+    );
+    return (result.recordset[0]?.def as string) ?? '';
   }
 }

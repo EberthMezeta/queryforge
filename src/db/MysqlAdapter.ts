@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { IAdapter } from './IAdapter';
-import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo } from '../types';
+import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
 
 export class MysqlAdapter implements IAdapter {
   private pool: mysql.Pool | null = null;
@@ -93,6 +93,7 @@ export class MysqlAdapter implements IAdapter {
 
       // DML: UPDATE / INSERT / DELETE
       const ok = rows as mysql.OkPacket;
+
       return {
         columns: ['affected_rows', 'changed_rows', 'insert_id', 'info'],
         rows: [{
@@ -104,6 +105,37 @@ export class MysqlAdapter implements IAdapter {
         rowCount: ok.affectedRows,
         duration,
       };
+    } finally {
+      conn.release();
+    }
+  }
+
+  async getProcedures(database: string): Promise<ProcedureInfo[]> {
+    if (!this.pool) throw new Error('Not connected');
+    const [rows] = await this.pool.query<mysql.RowDataPacket[]>(
+      `SELECT ROUTINE_NAME AS name, ROUTINE_TYPE AS type
+       FROM information_schema.ROUTINES
+       WHERE ROUTINE_SCHEMA = ?
+       ORDER BY ROUTINE_TYPE, ROUTINE_NAME`,
+      [database],
+    );
+    return rows.map((r) => ({
+      name: r.name as string,
+      type: (r.type as string) === 'FUNCTION' ? 'function' : 'procedure',
+    })) as ProcedureInfo[];
+  }
+
+  async getProcedureDefinition(database: string, name: string, type: 'procedure' | 'function'): Promise<string> {
+    if (!this.pool) throw new Error('Not connected');
+    const keyword = type === 'function' ? 'FUNCTION' : 'PROCEDURE';
+    const col = type === 'function' ? 'Create Function' : 'Create Procedure';
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.query(`USE \`${database}\``);
+      const [rows] = await conn.query<mysql.RowDataPacket[]>(
+        `SHOW CREATE ${keyword} \`${name}\``,
+      );
+      return (rows[0]?.[col] as string) ?? '';
     } finally {
       conn.release();
     }

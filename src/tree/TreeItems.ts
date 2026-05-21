@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ConnectionConfig, TableInfo, ColumnInfo } from '../types';
+import { ConnectionConfig, TableInfo, ColumnInfo, ProcedureInfo } from '../types';
 import { IAdapter } from '../db/IAdapter';
 
 export class ConnectionItem extends vscode.TreeItem {
@@ -82,6 +82,39 @@ export class ColumnItem extends vscode.TreeItem {
     this.description = `${column.type}${column.nullable ? '' : ' NOT NULL'}`;
     this.iconPath = new vscode.ThemeIcon('symbol-field');
     this.tooltip = `${column.name}: ${column.type}${column.nullable ? ' (nullable)' : ''}`;
+  }
+}
+
+export class ProcedureFolderItem extends vscode.TreeItem {
+  contextValue = 'procedure-folder';
+
+  constructor(
+    public readonly procs: ProcedureInfo[],
+    public readonly database: string,
+    public readonly config: ConnectionConfig,
+    public readonly adapter: IAdapter,
+  ) {
+    super(`Procedures (${procs.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon('symbol-namespace');
+  }
+}
+
+export class ProcedureItem extends vscode.TreeItem {
+  constructor(
+    public readonly proc: ProcedureInfo,
+    public readonly database: string,
+    public readonly config: ConnectionConfig,
+    public readonly adapter: IAdapter,
+  ) {
+    super(proc.name, vscode.TreeItemCollapsibleState.None);
+    this.contextValue = proc.type;
+    this.iconPath = new vscode.ThemeIcon(proc.type === 'function' ? 'symbol-method' : 'symbol-namespace');
+    this.tooltip = `${proc.type}: ${database}.${proc.name}`;
+    this.command = {
+      command: 'dbConnection.openProcedure',
+      title: 'Open Procedure',
+      arguments: [this],
+    };
   }
 }
 

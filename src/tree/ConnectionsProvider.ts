@@ -8,6 +8,8 @@ import {
   FolderItem,
   TableItem,
   ColumnItem,
+  ProcedureFolderItem,
+  ProcedureItem,
   ErrorItem,
 } from './TreeItems';
 
@@ -17,6 +19,8 @@ type AnyItem =
   | FolderItem
   | TableItem
   | ColumnItem
+  | ProcedureFolderItem
+  | ProcedureItem
   | ErrorItem;
 
 export class ConnectionsProvider implements vscode.TreeDataProvider<AnyItem> {
@@ -87,6 +91,20 @@ export class ConnectionsProvider implements vscode.TreeDataProvider<AnyItem> {
             ),
           );
         }
+        // Procedures (only for adapters that support them)
+        if (element.adapter.getProcedures) {
+          try {
+            const procs = await element.adapter.getProcedures(element.database);
+            if (procs.length > 0) {
+              folders.push(
+                new ProcedureFolderItem(procs, element.database, element.config, element.adapter),
+              );
+            }
+          } catch {
+            // silently skip if procedures aren't accessible
+          }
+        }
+
         if (folders.length === 0) {
           return [new ErrorItem('No tables or views found')];
         }
@@ -100,6 +118,10 @@ export class ConnectionsProvider implements vscode.TreeDataProvider<AnyItem> {
       return element.tables.map(
         (t) => new TableItem(t.name, t.type, element.database, element.config, element.adapter),
       );
+    }
+
+    if (element instanceof ProcedureFolderItem) {
+      return element.procs.map((p) => new ProcedureItem(p, element.database, element.config, element.adapter));
     }
 
     if (element instanceof TableItem) {

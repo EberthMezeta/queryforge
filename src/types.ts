@@ -43,3 +43,8 @@ export interface ColumnInfo {
 export interface DatabaseInfo {
   name: string;
 }
+
+export interface ProcedureInfo {
+  name: string;
+  type: 'procedure' | 'function';
+}

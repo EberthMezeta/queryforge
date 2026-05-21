@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
 import { ConnectionStorage } from './storage/ConnectionStorage';
+import { BookmarkStorage } from './storage/BookmarkStorage';
 import { ConnectionsProvider } from './tree/ConnectionsProvider';
 import { QueryPanel } from './panels/QueryPanel';
 import { AddConnectionPanel } from './panels/AddConnectionPanel';
-import { ConnectionItem, DatabaseItem, TableItem } from './tree/TreeItems';
+import { ConnectionItem, DatabaseItem, TableItem, ProcedureItem } from './tree/TreeItems';
 import { DbType } from './types';
 
 export function activate(context: vscode.ExtensionContext): void {
   const storage = new ConnectionStorage(context);
+  const bookmarks = new BookmarkStorage(context);
   const provider = new ConnectionsProvider(storage);
 
   vscode.window.registerTreeDataProvider('dbConnection.connections', provider);
@@ -61,18 +63,27 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('dbConnection.openTable', (item: TableItem) => {
       const sql = buildSelectQuery(item.table, item.config.type);
-      QueryPanel.createOrShow(
-        context,
-        item.config,
-        item.database,
-        sql,
-        item.adapter,
-        true,
-      );
+      QueryPanel.createOrShow(context, bookmarks, item.config, item.database, sql, item.adapter, true);
     }),
 
     vscode.commands.registerCommand('dbConnection.openQueryEditor', (item: DatabaseItem) => {
-      QueryPanel.createOrShow(context, item.config, item.database, '', item.adapter, false);
+      QueryPanel.createOrShow(context, bookmarks, item.config, item.database, '', item.adapter, false);
+    }),
+
+    vscode.commands.registerCommand('dbConnection.openProcedure', async (item: ProcedureItem) => {
+      if (!item.adapter.getProcedureDefinition) return;
+      try {
+        const ddl = await item.adapter.getProcedureDefinition(item.database, item.proc.name, item.proc.type);
+        if (!ddl.trim()) {
+          vscode.window.showWarningMessage(`Could not retrieve definition for "${item.proc.name}".`);
+          return;
+        }
+        QueryPanel.createOrShow(context, bookmarks, item.config, item.database, ddl, item.adapter, false);
+      } catch (err: unknown) {
+        vscode.window.showErrorMessage(
+          `Error reading procedure: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }),
   );
 }

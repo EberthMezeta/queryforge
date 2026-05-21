@@ -2,7 +2,7 @@
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const oracledb = require('oracledb');
 import { IAdapter } from './IAdapter';
-import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo } from '../types';
+import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
 
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 
@@ -71,5 +71,30 @@ export class OracleAdapter implements IAdapter {
     const rows = result.rows as Record<string, unknown>[];
     const columns = (result.metaData ?? []).map((m: any) => m.name as string);
     return { columns: columns.length ? columns : Object.keys(rows[0] ?? {}), rows, rowCount: rows.length, duration: Date.now() - start };
+  }
+
+  async getProcedures(_database: string): Promise<ProcedureInfo[]> {
+    if (!this.conn) throw new Error('Not connected');
+    const result = await this.conn.execute(
+      `SELECT object_name AS name, object_type AS type
+       FROM user_objects
+       WHERE object_type IN ('PROCEDURE', 'FUNCTION')
+       ORDER BY object_type, object_name`,
+    );
+    return ((result.rows ?? []) as Record<string, unknown>[]).map((r) => ({
+      name: r.NAME as string,
+      type: (r.TYPE as string) === 'FUNCTION' ? 'function' : 'procedure',
+    })) as ProcedureInfo[];
+  }
+
+  async getProcedureDefinition(_database: string, name: string, type: 'procedure' | 'function'): Promise<string> {
+    if (!this.conn) throw new Error('Not connected');
+    const objType = type === 'function' ? 'FUNCTION' : 'PROCEDURE';
+    const result = await this.conn.execute(
+      `SELECT DBMS_METADATA.GET_DDL(:1, :2) AS def FROM DUAL`,
+      [objType, name.toUpperCase()],
+    );
+    const rows = (result.rows ?? []) as Record<string, unknown>[];
+    return String(rows[0]?.DEF ?? '');
   }
 }

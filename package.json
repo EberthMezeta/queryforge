@@ -123,6 +123,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@codemirror/autocomplete": "^6.20.2",
     "@codemirror/commands": "^6.3.3",
     "@codemirror/lang-sql": "^6.6.0",
     "@codemirror/state": "^6.4.1",
