@@ -4,7 +4,7 @@
 
 - [ ] **Ejecutar texto seleccionado** — si hay texto seleccionado en el editor, ejecutar solo esa porción (como DBeaver con F5/Ctrl+Enter sobre selección)
 - [ ] **Múltiples statements** — ejecutar un bloque con varios queries separados por `;` y mostrar cada resultado por separado
-- [ ] **Transacciones persistentes** — `BEGIN` → queries → `COMMIT`/`ROLLBACK` en la misma sesión (actualmente PostgreSQL crea una conexión nueva por query)
+- [X] **Transacciones persistentes** — `BEGIN` → queries → `COMMIT`/`ROLLBACK` en la misma sesión (actualmente PostgreSQL crea una conexión nueva por query)
 - [X] **Cancelar query en ejecución** — botón o Ctrl+C para abortar una query que tarda demasiado
 
 ## Media prioridad (UX/productividad)
@@ -18,7 +18,7 @@
 
 ## Baja prioridad / mejoras
 
-- [ ] **Editar celdas inline** — click en una celda y editar su valor directamente (genera UPDATE automático)
+- [X] **Editar celdas inline** — click en una celda y editar su valor directamente (genera UPDATE automático)
 - [X] **Queries guardadas / bookmarks** — guardar queries con nombre para reutilizarlas
 - [X] **Exportar resultado filtrado** — aplicar filtro rápido en la tabla antes de exportar
 - [ ] **Formato de query** — botón para formatear/indentar el SQL automáticamente

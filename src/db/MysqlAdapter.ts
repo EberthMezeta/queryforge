@@ -147,6 +147,30 @@ export class MysqlAdapter implements IAdapter {
     })) as ProcedureInfo[];
   }
 
+  async getPrimaryKeys(database: string, table: string): Promise<string[]> {
+    if (!this.pool) throw new Error('Not connected');
+    const [rows] = await this.pool.query<mysql.RowDataPacket[]>(
+      `SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND CONSTRAINT_NAME = 'PRIMARY'
+       ORDER BY ORDINAL_POSITION`,
+      [database, table],
+    );
+    return rows.map((r) => r.COLUMN_NAME as string);
+  }
+
+  async updateCell(database: string, table: string, column: string, newValue: string | null, pkValues: Record<string, unknown>): Promise<void> {
+    if (!this.pool) throw new Error('Not connected');
+    const pkEntries = Object.entries(pkValues);
+    const params: unknown[] = [newValue, ...pkEntries.map(([, v]) => v)];
+    const where = pkEntries.map(([k]) => `\`${k}\` = ?`).join(' AND ');
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.query(`UPDATE \`${database}\`.\`${table}\` SET \`${column}\` = ? WHERE ${where}`, params);
+    } finally {
+      conn.release();
+    }
+  }
+
   async getProcedureDefinition(database: string, name: string, type: 'procedure' | 'function'): Promise<string> {
     if (!this.pool) throw new Error('Not connected');
     const keyword = type === 'function' ? 'FUNCTION' : 'PROCEDURE';

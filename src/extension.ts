@@ -65,12 +65,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('dbConnection.openTable', (item: TableItem) => {
       const sql = buildSelectQuery(item.table, item.config.type);
-      QueryPanel.createOrShow(context, bookmarks, historyStorage, item.config, item.database, sql, item.adapter, true);
+      QueryPanel.createOrShow(context, bookmarks, historyStorage, item.config, item.database, sql, item.adapter, true, item.table);
     }),
 
     vscode.commands.registerCommand('dbConnection.openTableInNewTab', (item: TableItem) => {
       const sql = buildSelectQuery(item.table, item.config.type);
-      QueryPanel.createNew(context, bookmarks, historyStorage, item.config, item.database, sql, item.adapter);
+      QueryPanel.createNew(context, bookmarks, historyStorage, item.config, item.database, sql, item.adapter, item.table);
     }),
 
     vscode.commands.registerCommand('dbConnection.openQueryEditor', (item: DatabaseItem) => {

@@ -12,4 +12,6 @@ export interface IAdapter {
   getTableDDL?(database: string, table: string): Promise<string>;
   getProcedures?(database: string): Promise<ProcedureInfo[]>;
   getProcedureDefinition?(database: string, name: string, type: 'procedure' | 'function'): Promise<string>;
+  getPrimaryKeys?(database: string, table: string): Promise<string[]>;
+  updateCell?(database: string, table: string, column: string, newValue: string | null, pkValues: Record<string, unknown>): Promise<void>;
 }

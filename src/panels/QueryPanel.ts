@@ -5,11 +5,15 @@ import { BookmarkStorage } from '../storage/BookmarkStorage';
 import { HistoryStorage } from '../storage/HistoryStorage';
 
 interface WebviewMessage {
-  type: 'ready' | 'runQuery' | 'saveBookmark' | 'deleteBookmark' | 'cancelQuery' | 'clearHistory';
+  type: 'ready' | 'runQuery' | 'saveBookmark' | 'deleteBookmark' | 'cancelQuery' | 'clearHistory' | 'updateCell';
   sql?: string;
   database?: string;
   name?: string;
   id?: string;
+  table?: string;
+  column?: string;
+  newValue?: string | null;
+  pkValues?: Record<string, unknown>;
 }
 
 export class QueryPanel {
@@ -29,6 +33,7 @@ export class QueryPanel {
     private readonly database: string,
     initialQuery: string,
     private readonly adapter: IAdapter,
+    private readonly tableName: string,
     private readonly panelKey: string,
     viewColumn: vscode.ViewColumn = vscode.ViewColumn.One,
     autoRun = false,
@@ -64,6 +69,7 @@ export class QueryPanel {
     initialQuery: string,
     adapter: IAdapter,
     autoRun = false,
+    tableName = '',
   ): void {
     const key = `${config.id}:${database}`;
     const existing = QueryPanel.panels.get(key);
@@ -72,7 +78,7 @@ export class QueryPanel {
       if (initialQuery) existing.send({ type: 'setQuery', query: initialQuery, autoRun });
       return;
     }
-    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter, key, vscode.ViewColumn.One, autoRun);
+    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter, tableName, key, vscode.ViewColumn.One, autoRun);
   }
 
   static createNew(
@@ -83,19 +89,26 @@ export class QueryPanel {
     database: string,
     initialQuery: string,
     adapter: IAdapter,
+    tableName = '',
   ): void {
     const key = `${config.id}:${database}:${++QueryPanel.counter}`;
-    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter, key, vscode.ViewColumn.Active, true);
+    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter, tableName, key, vscode.ViewColumn.Active, true);
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {
     if (msg.type === 'ready') {
       if (this.pendingInit) {
+        let primaryKeys: string[] = [];
+        if (this.tableName && this.adapter.getPrimaryKeys) {
+          try { primaryKeys = await this.adapter.getPrimaryKeys(this.database, this.tableName); } catch { /* non-critical */ }
+        }
         this.send({
           type: 'init',
           ...this.pendingInit,
           bookmarks: this.bookmarks.getAll(this.config.id, this.database),
           history: this.historyStorage.getAll(this.config.id, this.database),
+          tableName: this.tableName,
+          primaryKeys,
         });
         this.pendingInit = null;
         this.loadSchemaAsync(this.database);
@@ -107,6 +120,20 @@ export class QueryPanel {
       this.cancelFn?.();
       if (this.adapter.cancelQuery) {
         this.adapter.cancelQuery(this.runningDatabase).catch(() => {});
+      }
+      return;
+    }
+
+    if (msg.type === 'updateCell' && msg.table && msg.column) {
+      if (!this.adapter.updateCell) {
+        this.send({ type: 'updateCellError', message: 'Cell editing not supported for this database type' });
+        return;
+      }
+      try {
+        await this.adapter.updateCell(this.database, msg.table, msg.column, msg.newValue ?? null, msg.pkValues ?? {});
+        this.broadcastReload(msg.table);
+      } catch (err: unknown) {
+        this.send({ type: 'updateCellError', message: err instanceof Error ? err.message : String(err) });
       }
       return;
     }
@@ -194,6 +221,14 @@ export class QueryPanel {
     for (const panel of QueryPanel.panels.values()) {
       if (panel.config.id === this.config.id && panel.database === this.database) {
         panel.send({ type: 'history', items });
+      }
+    }
+  }
+
+  private broadcastReload(table: string): void {
+    for (const panel of QueryPanel.panels.values()) {
+      if (panel.config.id === this.config.id && panel.database === this.database && panel.tableName === table) {
+        panel.send({ type: 'reloadData' });
       }
     }
   }
@@ -481,4 +516,25 @@ kbd{
 .history-sql{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;font-size:11px}
 .history-time{color:var(--vscode-descriptionForeground);font-size:10px;flex-shrink:0;white-space:nowrap}
 .history-empty{padding:14px 12px;color:var(--vscode-descriptionForeground);font-size:12px;text-align:center}
+.cell-editable{cursor:text}
+.cell-editable:hover{outline:1px solid var(--vscode-focusBorder);outline-offset:-1px}
+.cell-editing{padding:0!important}
+.cell-edit-wrap{display:flex;align-items:stretch;height:100%}
+.cell-input{
+  flex:1;min-width:0;min-height:24px;
+  background:var(--vscode-input-background);
+  color:var(--vscode-input-foreground);
+  border:2px solid var(--vscode-focusBorder);
+  border-right:none;
+  padding:2px 8px;font-size:12px;font-family:inherit;
+  outline:none;box-sizing:border-box;
+}
+.cell-save-btn{
+  flex-shrink:0;
+  background:var(--vscode-button-background);
+  color:var(--vscode-button-foreground);
+  border:none;cursor:pointer;
+  padding:0 8px;font-size:13px;font-weight:600;
+}
+.cell-save-btn:hover{background:var(--vscode-button-hoverBackground)}
 `;

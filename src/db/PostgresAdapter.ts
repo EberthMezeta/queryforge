@@ -157,6 +157,30 @@ export class PostgresAdapter implements IAdapter {
     return (result.rows[0]?.def as string) ?? '';
   }
 
+  async getPrimaryKeys(database: string, table: string): Promise<string[]> {
+    const client = await this.getSessionClient(database);
+    const result = await client.query(
+      `SELECT kcu.column_name
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu
+         ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+       WHERE tc.table_schema = 'public' AND tc.table_name = $1
+         AND tc.constraint_type = 'PRIMARY KEY'
+       ORDER BY kcu.ordinal_position`,
+      [table],
+    );
+    return result.rows.map((r) => r.column_name as string);
+  }
+
+  async updateCell(database: string, table: string, column: string, newValue: string | null, pkValues: Record<string, unknown>): Promise<void> {
+    const client = await this.getSessionClient(database);
+    const pkEntries = Object.entries(pkValues);
+    const params: unknown[] = [newValue];
+    const where = pkEntries.map(([k, v], i) => { params.push(v); return `"${k}" = $${i + 2}`; }).join(' AND ');
+    await client.query(`UPDATE "${table}" SET "${column}" = $1 WHERE ${where}`, params);
+  }
+
   private async getSessionClient(database: string): Promise<Client> {
     let client = this.sessionClients.get(database);
     if (!client) {

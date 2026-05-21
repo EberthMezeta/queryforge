@@ -71,6 +71,25 @@ export class SqliteAdapter implements IAdapter {
     return (result[0]?.values[0]?.[0] as string) ?? '';
   }
 
+  async getPrimaryKeys(_database: string, table: string): Promise<string[]> {
+    if (!this.db) throw new Error('Not connected');
+    const result = this.db.exec(`PRAGMA table_info("${table.replace(/"/g, '""')}")`);
+    if (!result.length) return [];
+    // columns: cid, name, type, notnull, dflt_value, pk
+    return result[0].values
+      .filter((row) => (row[5] as number) > 0)
+      .sort((a, b) => (a[5] as number) - (b[5] as number))
+      .map((row) => row[1] as string);
+  }
+
+  async updateCell(_database: string, table: string, column: string, newValue: string | null, pkValues: Record<string, unknown>): Promise<void> {
+    const val = newValue === null ? 'NULL' : `'${newValue.replace(/'/g, "''")}'`;
+    const where = Object.entries(pkValues)
+      .map(([k, v]) => `"${k.replace(/"/g, '""')}" = ${v === null ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`}`)
+      .join(' AND ');
+    await this.query(`UPDATE "${table.replace(/"/g, '""')}" SET "${column.replace(/"/g, '""')}" = ${val} WHERE ${where}`);
+  }
+
   async query(sql: string, _database?: string): Promise<QueryResult> {
     if (!this.db) throw new Error('Not connected');
     const start = Date.now();

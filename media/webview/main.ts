@@ -28,11 +28,14 @@ const sqlLang = new Compartment();
 let editor: EditorView;
 let currentData: QueryResult | null = null;
 let currentDatabase = '';
+let currentTable = '';
+let primaryKeys: string[] = [];
 let bookmarks: Bookmark[] = [];
 let historyEntries: HistoryEntry[] = [];
 let historyIndex = -1;
 let currentPage = 0;
 let filterText = '';
+let editingCell: { td: HTMLElement; originalContent: string } | null = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -95,6 +98,13 @@ function init() {
   document.getElementById('bookmark-name-input')!.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') confirmSave();
     if (e.key === 'Escape') closeSaveForm();
+  });
+
+  document.getElementById('t-body')!.addEventListener('click', (e) => {
+    if (!currentTable || !primaryKeys.length) return;
+    const td = (e.target as HTMLElement).closest('td') as HTMLElement | null;
+    if (!td || !td.dataset.col || editingCell) return;
+    startCellEdit(td);
   });
 
   setExportButtons(false);
@@ -173,18 +183,20 @@ function renderPage() {
 
   const pageRows = rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
 
+  const editable = currentTable && primaryKeys.length > 0;
   document.getElementById('t-body')!.innerHTML = pageRows
-    .map(
-      (row) =>
-        `<tr>${currentData!.columns
-          .map((col) => {
-            const val = row[col];
-            return val === null || val === undefined
-              ? `<td><span class="null-val">NULL</span></td>`
-              : `<td>${esc(String(val))}</td>`;
-          })
-          .join('')}</tr>`,
-    )
+    .map((row) => {
+      const pkJson = editable ? esc(JSON.stringify(Object.fromEntries(primaryKeys.map((k) => [k, row[k]])))) : '';
+      const rowAttr = editable ? ` data-pk="${pkJson}"` : '';
+      return `<tr${rowAttr}>${currentData!.columns.map((col) => {
+        const val = row[col];
+        const isPk = primaryKeys.includes(col);
+        const colAttr = editable && !isPk ? ` class="cell-editable" data-col="${esc(col)}"` : '';
+        return val === null || val === undefined
+          ? `<td${colAttr}><span class="null-val">NULL</span></td>`
+          : `<td${colAttr}>${esc(String(val))}</td>`;
+      }).join('')}</tr>`;
+    })
     .join('');
 
   document.getElementById('table-wrapper')!.scrollTop = 0;
@@ -435,6 +447,68 @@ function exportPDF() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// ── Cell editing ──────────────────────────────────────────────────────────────
+
+function startCellEdit(td: HTMLElement) {
+  const tr = td.closest('tr') as HTMLElement;
+  const pkValues = JSON.parse(tr.dataset.pk || '{}') as Record<string, unknown>;
+  const originalContent = td.innerHTML;
+  const currentValue = td.querySelector('.null-val') ? '' : (td.textContent || '');
+  const col = td.dataset.col!;
+
+  editingCell = { td, originalContent };
+  td.classList.add('cell-editing');
+
+  const wrap = document.createElement('div');
+  wrap.className = 'cell-edit-wrap';
+
+  const input = document.createElement('input');
+  input.className = 'cell-input';
+  input.value = currentValue;
+
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'cell-save-btn';
+  saveBtn.textContent = '✓';
+  saveBtn.title = 'Save (Ctrl+S)';
+
+  saveBtn.addEventListener('mousedown', (e) => e.preventDefault());
+  saveBtn.addEventListener('click', () => commitCellEdit(col, pkValues, input.value));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { cancelCellEdit(); }
+    if (e.ctrlKey && e.key === 's') { e.preventDefault(); commitCellEdit(col, pkValues, input.value); }
+  });
+  input.addEventListener('blur', () => { if (editingCell) cancelCellEdit(); });
+
+  wrap.appendChild(input);
+  wrap.appendChild(saveBtn);
+  td.innerHTML = '';
+  td.appendChild(wrap);
+  setTimeout(() => { input.focus(); input.select(); }, 0);
+}
+
+function cancelCellEdit() {
+  if (!editingCell) return;
+  editingCell.td.innerHTML = editingCell.originalContent;
+  editingCell.td.classList.remove('cell-editing');
+  editingCell = null;
+}
+
+function commitCellEdit(column: string, pkValues: Record<string, unknown>, newValue: string) {
+  if (!editingCell) return;
+  const td = editingCell.td;
+  editingCell = null; // primero, para que blur no dispare cancelCellEdit
+  td.classList.remove('cell-editing');
+  td.innerHTML = newValue === '' ? '<span class="null-val">NULL</span>' : esc(newValue);
+  vscode.postMessage({
+    type: 'updateCell',
+    table: currentTable,
+    database: currentDatabase,
+    column,
+    newValue: newValue === '' ? null : newValue,
+    pkValues,
+  });
+}
+
 function copyText(text: string, btn: HTMLElement) {
   navigator.clipboard.writeText(text).then(() => {
     const original = btn.textContent!;
@@ -471,6 +545,8 @@ window.addEventListener('message', (event) => {
   switch (msg.type) {
     case 'init':
       currentDatabase = msg.database as string;
+      currentTable = (msg.tableName as string) || '';
+      primaryKeys = (msg.primaryKeys as string[]) || [];
       document.getElementById('conn-name')!.textContent = msg.connectionName as string;
       document.getElementById('db-name')!.textContent = msg.database as string;
       updateBookmarks((msg.bookmarks as Bookmark[]) ?? []);
@@ -509,6 +585,14 @@ window.addEventListener('message', (event) => {
 
     case 'history':
       updateHistory(msg.items as HistoryEntry[]);
+      break;
+
+    case 'reloadData':
+      if (!editingCell) runQuery();
+      break;
+
+    case 'updateCellError':
+      showError(msg.message as string);
       break;
   }
 });
