@@ -218,7 +218,8 @@ body{
   color:var(--vscode-button-secondaryForeground);
   padding:3px 10px;font-size:11px;
 }
-.btn-sm:hover{background:var(--vscode-button-secondaryHoverBackground)}
+.btn-sm:hover:not(:disabled){background:var(--vscode-button-secondaryHoverBackground)}
+.btn:disabled{opacity:0.4;cursor:not-allowed}
 kbd{
   background:var(--vscode-keybindingLabel-background);
   border:1px solid var(--vscode-keybindingLabel-border);

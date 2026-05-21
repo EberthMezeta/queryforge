@@ -55,6 +55,7 @@ function init() {
   document.getElementById('export-json')!.addEventListener('click', exportJSON);
   document.getElementById('export-pdf')!.addEventListener('click', exportPDF);
 
+  setExportButtons(false);
   vscode.postMessage({ type: 'ready' });
 }
 
@@ -63,6 +64,13 @@ function runQuery() {
   if (!sql) return;
   showLoading();
   vscode.postMessage({ type: 'runQuery', sql, database: currentDatabase });
+}
+
+function setExportButtons(enabled: boolean) {
+  ['export-csv', 'export-json', 'export-pdf'].forEach((id) => {
+    const btn = document.getElementById(id) as HTMLButtonElement;
+    btn.disabled = !enabled;
+  });
 }
 
 function showLoading() {
@@ -98,12 +106,14 @@ function showResults(data: QueryResult) {
     )
     .join('');
 
+  setExportButtons(data.rows.length > 0);
   show('results-section');
 }
 
 function showError(message: string) {
   hide('loading-section');
   hide('results-section');
+  setExportButtons(false);
   document.getElementById('error-msg')!.textContent = message;
   show('error-section');
 }
