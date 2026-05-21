@@ -48,23 +48,24 @@ export class SqlServerAdapter implements IAdapter {
   async getTables(database: string): Promise<TableInfo[]> {
     if (!this.pool) throw new Error('Not connected');
     const result = await this.pool.request().query(`
-      SELECT TABLE_NAME AS name, TABLE_TYPE AS type
+      SELECT TABLE_NAME AS name, TABLE_TYPE AS type, TABLE_SCHEMA AS schema
       FROM [${database}].INFORMATION_SCHEMA.TABLES
-      WHERE TABLE_SCHEMA = 'dbo'
-      ORDER BY TABLE_TYPE, TABLE_NAME
+      WHERE TABLE_SCHEMA NOT IN ('sys', 'INFORMATION_SCHEMA')
+      ORDER BY TABLE_SCHEMA, TABLE_TYPE, TABLE_NAME
     `);
     return result.recordset.map((r) => ({
       name: r.name as string,
       type: (r.type as string).trim() === 'VIEW' ? 'view' : 'table',
+      schema: r.schema as string,
     }));
   }
 
-  async getColumns(database: string, table: string): Promise<ColumnInfo[]> {
+  async getColumns(database: string, table: string, schema = 'dbo'): Promise<ColumnInfo[]> {
     if (!this.pool) throw new Error('Not connected');
     const result = await this.pool.request().query(`
       SELECT COLUMN_NAME AS name, DATA_TYPE AS type, IS_NULLABLE AS nullable
       FROM [${database}].INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = '${table.replace(/'/g, "''")}'
+      WHERE TABLE_SCHEMA = '${schema.replace(/'/g, "''")}' AND TABLE_NAME = '${table.replace(/'/g, "''")}'
       ORDER BY ORDINAL_POSITION
     `);
     return result.recordset.map((r) => ({
@@ -99,9 +100,10 @@ export class SqlServerAdapter implements IAdapter {
     };
   }
 
-  async getTableDDL(database: string, table: string): Promise<string> {
+  async getTableDDL(database: string, table: string, schema = 'dbo'): Promise<string> {
     if (!this.pool) throw new Error('Not connected');
-    const safe = table.replace(/'/g, "''");
+    const safeTable = table.replace(/'/g, "''");
+    const safeSchema = schema.replace(/'/g, "''");
     const result = await this.pool.request().query(`
       SELECT 'CREATE TABLE [' + TABLE_SCHEMA + '].[' + TABLE_NAME + '] (' + CHAR(10) +
         STRING_AGG(
@@ -112,7 +114,7 @@ export class SqlServerAdapter implements IAdapter {
           ',' + CHAR(10)
         ) WITHIN GROUP (ORDER BY ORDINAL_POSITION) + CHAR(10) + ');' AS ddl
       FROM [${database}].INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = '${safe}' AND TABLE_SCHEMA = 'dbo'
+      WHERE TABLE_NAME = '${safeTable}' AND TABLE_SCHEMA = '${safeSchema}'
       GROUP BY TABLE_SCHEMA, TABLE_NAME
     `);
     return (result.recordset[0]?.ddl as string) ?? '';
@@ -121,22 +123,53 @@ export class SqlServerAdapter implements IAdapter {
   async getProcedures(database: string): Promise<ProcedureInfo[]> {
     if (!this.pool) throw new Error('Not connected');
     const result = await this.pool.request().query(`
-      SELECT ROUTINE_NAME AS name, ROUTINE_TYPE AS type
+      SELECT ROUTINE_NAME AS name, ROUTINE_TYPE AS type, ROUTINE_SCHEMA AS schema
       FROM [${database}].INFORMATION_SCHEMA.ROUTINES
-      WHERE ROUTINE_SCHEMA = 'dbo'
-      ORDER BY ROUTINE_TYPE, ROUTINE_NAME
+      WHERE ROUTINE_SCHEMA NOT IN ('sys', 'INFORMATION_SCHEMA')
+      ORDER BY ROUTINE_SCHEMA, ROUTINE_TYPE, ROUTINE_NAME
     `);
     return result.recordset.map((r) => ({
       name: r.name as string,
       type: (r.type as string).trim() === 'FUNCTION' ? 'function' : 'procedure',
+      schema: r.schema as string,
     })) as ProcedureInfo[];
   }
 
-  async getProcedureDefinition(database: string, name: string): Promise<string> {
+  async getProcedureDefinition(database: string, name: string, _type?: string, schema = 'dbo'): Promise<string> {
     if (!this.pool) throw new Error('Not connected');
+    const safeName = name.replace(/]/g, ']]');
+    const safeSchema = schema.replace(/]/g, ']]');
     const result = await this.pool.request().query(
-      `SELECT OBJECT_DEFINITION(OBJECT_ID('[${database}].[dbo].[${name.replace(/]/g, ']]')}]')) AS def`,
+      `SELECT OBJECT_DEFINITION(OBJECT_ID('[${database}].[${safeSchema}].[${safeName}]')) AS def`,
     );
     return (result.recordset[0]?.def as string) ?? '';
+  }
+
+  async getPrimaryKeys(database: string, table: string, schema = 'dbo'): Promise<string[]> {
+    if (!this.pool) throw new Error('Not connected');
+    const safeTable = table.replace(/'/g, "''");
+    const safeSchema = schema.replace(/'/g, "''");
+    const result = await this.pool.request().query(`
+      SELECT kcu.COLUMN_NAME
+      FROM [${database}].INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+      JOIN [${database}].INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+        ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+        AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+      WHERE tc.TABLE_SCHEMA = '${safeSchema}'
+        AND tc.TABLE_NAME = '${safeTable}'
+        AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+      ORDER BY kcu.ORDINAL_POSITION
+    `);
+    return result.recordset.map((r) => r.COLUMN_NAME as string);
+  }
+
+  async updateCell(database: string, table: string, column: string, newValue: string | null, pkValues: Record<string, unknown>, schema = 'dbo'): Promise<void> {
+    if (!this.pool) throw new Error('Not connected');
+    const pkEntries = Object.entries(pkValues);
+    const req = this.pool.request();
+    req.input('newVal', newValue);
+    pkEntries.forEach(([, v], i) => req.input(`pk${i}`, v));
+    const where = pkEntries.map(([k], i) => `[${k}] = @pk${i}`).join(' AND ');
+    await req.query(`UPDATE [${database}].[${schema}].[${table}] SET [${column}] = @newVal WHERE ${where}`);
   }
 }

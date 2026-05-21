@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import { ConnectionStorage } from '../storage/ConnectionStorage';
 import { createAdapter, IAdapter } from '../db/index';
-import { ConnectionConfig } from '../types';
+import { ConnectionConfig, ProcedureInfo } from '../types';
 import {
   ConnectionItem,
   DatabaseItem,
+  SchemaItem,
   FolderItem,
   TableItem,
   ColumnItem,
@@ -16,6 +17,7 @@ import {
 type AnyItem =
   | ConnectionItem
   | DatabaseItem
+  | SchemaItem
   | FolderItem
   | TableItem
   | ColumnItem
@@ -64,69 +66,56 @@ export class ConnectionsProvider implements vscode.TreeDataProvider<AnyItem> {
     if (element instanceof DatabaseItem) {
       try {
         const tables = await element.adapter.getTables(element.database);
-        const tablesList = tables.filter((t) => t.type === 'table');
-        const viewsList = tables.filter((t) => t.type === 'view');
-        const folders: AnyItem[] = [];
-        if (tablesList.length > 0) {
-          folders.push(
-            new FolderItem(
-              'Tables',
-              tablesList,
-              element.database,
-              element.config,
-              element.adapter,
-              'list-flat',
-            ),
-          );
-        }
-        if (viewsList.length > 0) {
-          folders.push(
-            new FolderItem(
-              'Views',
-              viewsList,
-              element.database,
-              element.config,
-              element.adapter,
-              'eye',
-            ),
-          );
-        }
-        // Procedures (only for adapters that support them)
+
+        // Collect procedures upfront (needed to detect multi-schema)
+        let procs: ProcedureInfo[] = [];
         if (element.adapter.getProcedures) {
-          try {
-            const procs = await element.adapter.getProcedures(element.database);
-            if (procs.length > 0) {
-              folders.push(
-                new ProcedureFolderItem(procs, element.database, element.config, element.adapter),
-              );
-            }
-          } catch {
-            // silently skip if procedures aren't accessible
-          }
+          try { procs = await element.adapter.getProcedures(element.database); } catch { /* non-critical */ }
         }
 
-        if (folders.length === 0) {
-          return [new ErrorItem('No tables or views found')];
+        // Detect unique schemas (only for adapters that return schema info)
+        const schemasSet = new Set<string>([
+          ...tables.map((t) => t.schema || ''),
+          ...procs.map((p) => p.schema || ''),
+        ].filter((s) => s !== ''));
+        const allSchemas = [...schemasSet].sort();
+
+        if (allSchemas.length > 1) {
+          // Group by schema — show SchemaItem for each
+          return allSchemas.map((schema) => {
+            const schemaTables = tables.filter((t) => t.schema === schema);
+            const schemaProcs = procs.filter((p) => p.schema === schema);
+            return new SchemaItem(schema, element.database, element.config, element.adapter, schemaTables, schemaProcs);
+          });
         }
-        return folders;
+
+        // Single schema (or adapter without schema concept) — flat folders
+        const defaultSchema = tables[0]?.schema || '';
+        return buildFolders(tables, procs, element.database, element.config, element.adapter, defaultSchema);
       } catch (err: unknown) {
         return [new ErrorItem(errorMessage(err))];
       }
     }
 
+    if (element instanceof SchemaItem) {
+      return buildFolders(element.tables, element.procs, element.database, element.config, element.adapter, element.schema);
+    }
+
     if (element instanceof FolderItem) {
       return element.tables.map(
-        (t) => new TableItem(t.name, t.type, element.database, element.config, element.adapter),
+        (t) => new TableItem(t.name, t.type, element.database, element.config, element.adapter, t.schema || element.schema),
       );
     }
 
     if (element instanceof ProcedureFolderItem) {
-      return element.procs.map((p) => new ProcedureItem(p, element.database, element.config, element.adapter));
+      return element.procs.map(
+        (p) => new ProcedureItem(p, element.database, element.config, element.adapter, p.schema || element.schema),
+      );
     }
 
     if (element instanceof TableItem) {
       try {
-        const columns = await element.adapter.getColumns(element.database, element.table);
+        const columns = await element.adapter.getColumns(element.database, element.table, element.schema || undefined);
         return columns.map((c) => new ColumnItem(c));
       } catch {
         return [];
@@ -158,6 +147,32 @@ export class ConnectionsProvider implements vscode.TreeDataProvider<AnyItem> {
       this.adapters.delete(id);
     }
   }
+}
+
+function buildFolders(
+  tables: import('../types').TableInfo[],
+  procs: ProcedureInfo[],
+  database: string,
+  config: ConnectionConfig,
+  adapter: IAdapter,
+  schema: string,
+): AnyItem[] {
+  const tablesList = tables.filter((t) => t.type === 'table');
+  const viewsList = tables.filter((t) => t.type === 'view');
+  const folders: AnyItem[] = [];
+
+  if (tablesList.length > 0) {
+    folders.push(new FolderItem('Tables', tablesList, database, config, adapter, 'list-flat', schema));
+  }
+  if (viewsList.length > 0) {
+    folders.push(new FolderItem('Views', viewsList, database, config, adapter, 'eye', schema));
+  }
+  if (procs.length > 0) {
+    folders.push(new ProcedureFolderItem(procs, database, config, adapter, schema));
+  }
+
+  if (folders.length === 0) return [new ErrorItem('No tables or views found')];
+  return folders;
 }
 
 function errorMessage(err: unknown): string {

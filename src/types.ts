@@ -32,6 +32,7 @@ export interface QueryResult {
 export interface TableInfo {
   name: string;
   type: 'table' | 'view';
+  schema?: string;
 }
 
 export interface ColumnInfo {
@@ -47,4 +48,5 @@ export interface DatabaseInfo {
 export interface ProcedureInfo {
   name: string;
   type: 'procedure' | 'function';
+  schema?: string;
 }

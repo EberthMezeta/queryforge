@@ -14,6 +14,7 @@ interface WebviewMessage {
   column?: string;
   newValue?: string | null;
   pkValues?: Record<string, unknown>;
+  schema?: string;
 }
 
 export class QueryPanel {
@@ -34,6 +35,7 @@ export class QueryPanel {
     initialQuery: string,
     private readonly adapter: IAdapter,
     private readonly tableName: string,
+    private readonly schema: string,
     private readonly panelKey: string,
     viewColumn: vscode.ViewColumn = vscode.ViewColumn.One,
     autoRun = false,
@@ -70,6 +72,7 @@ export class QueryPanel {
     adapter: IAdapter,
     autoRun = false,
     tableName = '',
+    schema = '',
   ): void {
     const key = `${config.id}:${database}`;
     const existing = QueryPanel.panels.get(key);
@@ -78,7 +81,7 @@ export class QueryPanel {
       if (initialQuery) existing.send({ type: 'setQuery', query: initialQuery, autoRun });
       return;
     }
-    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter, tableName, key, vscode.ViewColumn.One, autoRun);
+    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter, tableName, schema, key, vscode.ViewColumn.One, autoRun);
   }
 
   static createNew(
@@ -90,9 +93,10 @@ export class QueryPanel {
     initialQuery: string,
     adapter: IAdapter,
     tableName = '',
+    schema = '',
   ): void {
     const key = `${config.id}:${database}:${++QueryPanel.counter}`;
-    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter, tableName, key, vscode.ViewColumn.Active, true);
+    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter, tableName, schema, key, vscode.ViewColumn.Active, true);
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {
@@ -100,7 +104,7 @@ export class QueryPanel {
       if (this.pendingInit) {
         let primaryKeys: string[] = [];
         if (this.tableName && this.adapter.getPrimaryKeys) {
-          try { primaryKeys = await this.adapter.getPrimaryKeys(this.database, this.tableName); } catch { /* non-critical */ }
+          try { primaryKeys = await this.adapter.getPrimaryKeys(this.database, this.tableName, this.schema || undefined); } catch { /* non-critical */ }
         }
         this.send({
           type: 'init',
@@ -108,6 +112,7 @@ export class QueryPanel {
           bookmarks: this.bookmarks.getAll(this.config.id, this.database),
           history: this.historyStorage.getAll(this.config.id, this.database),
           tableName: this.tableName,
+          schema: this.schema,
           primaryKeys,
         });
         this.pendingInit = null;
@@ -130,8 +135,9 @@ export class QueryPanel {
         return;
       }
       try {
-        await this.adapter.updateCell(this.database, msg.table, msg.column, msg.newValue ?? null, msg.pkValues ?? {});
-        this.broadcastReload(msg.table);
+        const cellSchema = msg.schema ?? this.schema;
+        await this.adapter.updateCell(this.database, msg.table, msg.column, msg.newValue ?? null, msg.pkValues ?? {}, cellSchema || undefined);
+        this.broadcastReload(msg.table, cellSchema);
       } catch (err: unknown) {
         this.send({ type: 'updateCellError', message: err instanceof Error ? err.message : String(err) });
       }
@@ -194,7 +200,7 @@ export class QueryPanel {
       await Promise.allSettled(
         tables.map(async (t) => {
           try {
-            const cols = await this.adapter.getColumns(database, t.name);
+            const cols = await this.adapter.getColumns(database, t.name, t.schema);
             schema[t.name] = cols.map((c) => c.name);
           } catch {
             schema[t.name] = [];
@@ -225,9 +231,14 @@ export class QueryPanel {
     }
   }
 
-  private broadcastReload(table: string): void {
+  private broadcastReload(table: string, schema: string): void {
     for (const panel of QueryPanel.panels.values()) {
-      if (panel.config.id === this.config.id && panel.database === this.database && panel.tableName === table) {
+      if (
+        panel.config.id === this.config.id &&
+        panel.database === this.database &&
+        panel.tableName === table &&
+        panel.schema === schema
+      ) {
         panel.send({ type: 'reloadData' });
       }
     }

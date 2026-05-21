@@ -6,12 +6,12 @@ export interface IAdapter {
   isConnected(): boolean;
   getDatabases(): Promise<DatabaseInfo[]>;
   getTables(database: string): Promise<TableInfo[]>;
-  getColumns(database: string, table: string): Promise<ColumnInfo[]>;
+  getColumns(database: string, table: string, schema?: string): Promise<ColumnInfo[]>;
   query(sql: string, database?: string): Promise<QueryResult>;
   cancelQuery?(database?: string): Promise<void>;
-  getTableDDL?(database: string, table: string): Promise<string>;
+  getTableDDL?(database: string, table: string, schema?: string): Promise<string>;
   getProcedures?(database: string): Promise<ProcedureInfo[]>;
-  getProcedureDefinition?(database: string, name: string, type: 'procedure' | 'function'): Promise<string>;
-  getPrimaryKeys?(database: string, table: string): Promise<string[]>;
-  updateCell?(database: string, table: string, column: string, newValue: string | null, pkValues: Record<string, unknown>): Promise<void>;
+  getProcedureDefinition?(database: string, name: string, type: 'procedure' | 'function', schema?: string): Promise<string>;
+  getPrimaryKeys?(database: string, table: string, schema?: string): Promise<string[]>;
+  updateCell?(database: string, table: string, column: string, newValue: string | null, pkValues: Record<string, unknown>, schema?: string): Promise<void>;
 }

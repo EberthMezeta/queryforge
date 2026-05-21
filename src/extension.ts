@@ -64,28 +64,28 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand('dbConnection.openTable', (item: TableItem) => {
-      const sql = buildSelectQuery(item.table, item.config.type);
-      QueryPanel.createOrShow(context, bookmarks, historyStorage, item.config, item.database, sql, item.adapter, true, item.table);
+      const sql = buildSelectQuery(item.table, item.schema, item.config.type);
+      QueryPanel.createOrShow(context, bookmarks, historyStorage, item.config, item.database, sql, item.adapter, true, item.table, item.schema);
     }),
 
     vscode.commands.registerCommand('dbConnection.openTableInNewTab', (item: TableItem) => {
-      const sql = buildSelectQuery(item.table, item.config.type);
-      QueryPanel.createNew(context, bookmarks, historyStorage, item.config, item.database, sql, item.adapter, item.table);
+      const sql = buildSelectQuery(item.table, item.schema, item.config.type);
+      QueryPanel.createNew(context, bookmarks, historyStorage, item.config, item.database, sql, item.adapter, item.table, item.schema);
     }),
 
     vscode.commands.registerCommand('dbConnection.openQueryEditor', (item: DatabaseItem) => {
-      QueryPanel.createOrShow(context, bookmarks, historyStorage, item.config, item.database, '', item.adapter, false);
+      QueryPanel.createOrShow(context, bookmarks, historyStorage, item.config, item.database, '', item.adapter);
     }),
 
     vscode.commands.registerCommand('dbConnection.viewDDL', async (item: TableItem) => {
       if (!item.adapter.getTableDDL) return;
       try {
-        const ddl = await item.adapter.getTableDDL(item.database, item.table);
+        const ddl = await item.adapter.getTableDDL(item.database, item.table, item.schema || undefined);
         if (!ddl.trim()) {
           vscode.window.showWarningMessage(`Could not retrieve DDL for "${item.table}".`);
           return;
         }
-        QueryPanel.createOrShow(context, bookmarks, historyStorage, item.config, item.database, ddl, item.adapter, false);
+        QueryPanel.createOrShow(context, bookmarks, historyStorage, item.config, item.database, ddl, item.adapter);
       } catch (err: unknown) {
         vscode.window.showErrorMessage(
           `Error reading DDL: ${err instanceof Error ? err.message : String(err)}`,
@@ -96,12 +96,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('dbConnection.openProcedure', async (item: ProcedureItem) => {
       if (!item.adapter.getProcedureDefinition) return;
       try {
-        const ddl = await item.adapter.getProcedureDefinition(item.database, item.proc.name, item.proc.type);
+        const ddl = await item.adapter.getProcedureDefinition(item.database, item.proc.name, item.proc.type, item.schema || undefined);
         if (!ddl.trim()) {
           vscode.window.showWarningMessage(`Could not retrieve definition for "${item.proc.name}".`);
           return;
         }
-        QueryPanel.createOrShow(context, bookmarks, historyStorage, item.config, item.database, ddl, item.adapter, false);
+        QueryPanel.createOrShow(context, bookmarks, historyStorage, item.config, item.database, ddl, item.adapter);
       } catch (err: unknown) {
         vscode.window.showErrorMessage(
           `Error reading procedure: ${err instanceof Error ? err.message : String(err)}`,
@@ -121,14 +121,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {}
 
-function buildSelectQuery(table: string, dbType: DbType): string {
+function buildSelectQuery(table: string, schema: string, dbType: DbType): string {
   switch (dbType) {
-    case 'mysql':    return `SELECT * FROM \`${table}\` LIMIT 150`;
-    case 'mssql':    return `SELECT TOP 150 * FROM [${table}]`;
-    case 'oracle':   return `SELECT * FROM "${table}" FETCH FIRST 150 ROWS ONLY`;
-    case 'mongodb':  return `db.${table}.find({}).limit(150)`;
-    case 'redis':    return `TYPE ${table}\nGET ${table}`;
-    case 'graphql':  return `{\n  ${table} {\n    id\n  }\n}`;
-    default:         return `SELECT * FROM "${table}" LIMIT 150`;
+    case 'mysql':   return `SELECT * FROM \`${table}\` LIMIT 150`;
+    case 'mssql':   return schema
+      ? `SELECT TOP 150 * FROM [${schema}].[${table}]`
+      : `SELECT TOP 150 * FROM [${table}]`;
+    case 'oracle':  return `SELECT * FROM "${table}" FETCH FIRST 150 ROWS ONLY`;
+    case 'mongodb': return `db.${table}.find({}).limit(150)`;
+    case 'redis':   return `TYPE ${table}\nGET ${table}`;
+    case 'graphql': return `{\n  ${table} {\n    id\n  }\n}`;
+    default:        return schema
+      ? `SELECT * FROM "${schema}"."${table}" LIMIT 150`
+      : `SELECT * FROM "${table}" LIMIT 150`;
   }
 }

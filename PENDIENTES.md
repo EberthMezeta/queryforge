@@ -22,7 +22,7 @@
 - [X] **Queries guardadas / bookmarks** — guardar queries con nombre para reutilizarlas
 - [X] **Exportar resultado filtrado** — aplicar filtro rápido en la tabla antes de exportar
 - [ ] **Formato de query** — botón para formatear/indentar el SQL automáticamente
-- [ ] **Soporte a múltiples schemas** (PostgreSQL/SQL Server) — actualmente asume `public`/`dbo`
+- [X] **Soporte a múltiples schemas** (PostgreSQL/SQL Server) — árbol agrupa por schema cuando hay más de uno; `public`/`dbo` queda plano como antes
 - [X] **Reconectar automáticamente** — al abrir VS Code reconecta todas las conexiones guardadas en segundo plano
 
 ## Bugs conocidos

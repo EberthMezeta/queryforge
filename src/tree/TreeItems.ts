@@ -38,6 +38,24 @@ export class DatabaseItem extends vscode.TreeItem {
   }
 }
 
+export class SchemaItem extends vscode.TreeItem {
+  contextValue = 'schema';
+
+  constructor(
+    public readonly schema: string,
+    public readonly database: string,
+    public readonly config: ConnectionConfig,
+    public readonly adapter: IAdapter,
+    public readonly tables: TableInfo[],
+    public readonly procs: ProcedureInfo[],
+  ) {
+    super(schema, vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon('symbol-namespace');
+    this.tooltip = `Schema: ${schema}`;
+    this.description = `${tables.length} obj`;
+  }
+}
+
 export class FolderItem extends vscode.TreeItem {
   contextValue = 'folder';
 
@@ -48,6 +66,7 @@ export class FolderItem extends vscode.TreeItem {
     public readonly config: ConnectionConfig,
     public readonly adapter: IAdapter,
     icon: string,
+    public readonly schema = '',
   ) {
     super(`${label} (${tables.length})`, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon(icon);
@@ -61,11 +80,12 @@ export class TableItem extends vscode.TreeItem {
     public readonly database: string,
     public readonly config: ConnectionConfig,
     public readonly adapter: IAdapter,
+    public readonly schema = '',
   ) {
     super(table, vscode.TreeItemCollapsibleState.Collapsed);
     this.contextValue = tableType;
     this.iconPath = new vscode.ThemeIcon(tableType === 'view' ? 'eye' : 'table');
-    this.tooltip = `${tableType}: ${database}.${table}`;
+    this.tooltip = `${tableType}: ${schema ? `${schema}.` : ''}${database}.${table}`;
     this.command = {
       command: 'dbConnection.openTable',
       title: 'Open Table',
@@ -93,6 +113,7 @@ export class ProcedureFolderItem extends vscode.TreeItem {
     public readonly database: string,
     public readonly config: ConnectionConfig,
     public readonly adapter: IAdapter,
+    public readonly schema = '',
   ) {
     super(`Procedures (${procs.length})`, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('symbol-namespace');
@@ -105,11 +126,12 @@ export class ProcedureItem extends vscode.TreeItem {
     public readonly database: string,
     public readonly config: ConnectionConfig,
     public readonly adapter: IAdapter,
+    public readonly schema = '',
   ) {
     super(proc.name, vscode.TreeItemCollapsibleState.None);
     this.contextValue = proc.type;
     this.iconPath = new vscode.ThemeIcon(proc.type === 'function' ? 'symbol-method' : 'symbol-namespace');
-    this.tooltip = `${proc.type}: ${database}.${proc.name}`;
+    this.tooltip = `${proc.type}: ${schema ? `${schema}.` : ''}${database}.${proc.name}`;
     this.command = {
       command: 'dbConnection.openProcedure',
       title: 'Open Procedure',

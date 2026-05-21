@@ -29,6 +29,7 @@ let editor: EditorView;
 let currentData: QueryResult | null = null;
 let currentDatabase = '';
 let currentTable = '';
+let currentSchema = '';
 let primaryKeys: string[] = [];
 let bookmarks: Bookmark[] = [];
 let historyEntries: HistoryEntry[] = [];
@@ -503,6 +504,7 @@ function commitCellEdit(column: string, pkValues: Record<string, unknown>, newVa
     type: 'updateCell',
     table: currentTable,
     database: currentDatabase,
+    schema: currentSchema,
     column,
     newValue: newValue === '' ? null : newValue,
     pkValues,
@@ -546,6 +548,7 @@ window.addEventListener('message', (event) => {
     case 'init':
       currentDatabase = msg.database as string;
       currentTable = (msg.tableName as string) || '';
+      currentSchema = (msg.schema as string) || '';
       primaryKeys = (msg.primaryKeys as string[]) || [];
       document.getElementById('conn-name')!.textContent = msg.connectionName as string;
       document.getElementById('db-name')!.textContent = msg.database as string;

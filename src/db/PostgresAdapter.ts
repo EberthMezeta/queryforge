@@ -53,25 +53,26 @@ export class PostgresAdapter implements IAdapter {
   async getTables(database: string): Promise<TableInfo[]> {
     const client = await this.getSessionClient(database);
     const result = await client.query(`
-      SELECT table_name AS name, table_type
+      SELECT table_name AS name, table_type, table_schema AS schema
       FROM information_schema.tables
-      WHERE table_schema = 'public'
-      ORDER BY table_type, table_name
+      WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+      ORDER BY table_schema, table_type, table_name
     `);
     return result.rows.map((r) => ({
-      name: r.name,
+      name: r.name as string,
       type: r.table_type === 'VIEW' ? 'view' : 'table',
+      schema: r.schema as string,
     })) as TableInfo[];
   }
 
-  async getColumns(database: string, table: string): Promise<ColumnInfo[]> {
+  async getColumns(database: string, table: string, schema = 'public'): Promise<ColumnInfo[]> {
     const client = await this.getSessionClient(database);
     const result = await client.query(
       `SELECT column_name AS name, data_type AS type, is_nullable
        FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name = $1
+       WHERE table_schema = $1 AND table_name = $2
        ORDER BY ordinal_position`,
-      [table],
+      [schema, table],
     );
     return result.rows.map((r) => ({
       name: r.name,
@@ -102,10 +103,10 @@ export class PostgresAdapter implements IAdapter {
     };
   }
 
-  async getTableDDL(database: string, table: string): Promise<string> {
+  async getTableDDL(database: string, table: string, schema = 'public'): Promise<string> {
     const client = await this.getSessionClient(database);
     const result = await client.query(
-      `SELECT 'CREATE TABLE ' || quote_ident(table_name) || E' (\n' ||
+      `SELECT 'CREATE TABLE ' || quote_ident(table_schema) || '.' || quote_ident(table_name) || E' (\n' ||
               string_agg(
                 '  ' || quote_ident(column_name) || ' ' || data_type ||
                 CASE WHEN character_maximum_length IS NOT NULL
@@ -114,9 +115,9 @@ export class PostgresAdapter implements IAdapter {
                 E',\n' ORDER BY ordinal_position
               ) || E'\n);' AS ddl
        FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name = $1
-       GROUP BY table_name`,
-      [table],
+       WHERE table_schema = $1 AND table_name = $2
+       GROUP BY table_schema, table_name`,
+      [schema, table],
     );
     return (result.rows[0]?.ddl as string) ?? '';
   }
@@ -133,31 +134,32 @@ export class PostgresAdapter implements IAdapter {
   async getProcedures(database: string): Promise<ProcedureInfo[]> {
     const client = await this.getSessionClient(database);
     const result = await client.query(`
-      SELECT routine_name AS name, routine_type AS type
+      SELECT routine_name AS name, routine_type AS type, routine_schema AS schema
       FROM information_schema.routines
-      WHERE routine_schema = 'public'
-      ORDER BY routine_type, routine_name
+      WHERE routine_schema NOT IN ('pg_catalog', 'information_schema')
+      ORDER BY routine_schema, routine_type, routine_name
     `);
     return result.rows.map((r) => ({
       name: r.name as string,
       type: (r.type as string) === 'FUNCTION' ? 'function' : 'procedure',
+      schema: r.schema as string,
     })) as ProcedureInfo[];
   }
 
-  async getProcedureDefinition(database: string, name: string): Promise<string> {
+  async getProcedureDefinition(database: string, name: string, _type?: string, schema = 'public'): Promise<string> {
     const client = await this.getSessionClient(database);
     const result = await client.query(
       `SELECT pg_get_functiondef(p.oid) AS def
        FROM pg_proc p
        JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'public' AND p.proname = $1
+       WHERE n.nspname = $1 AND p.proname = $2
        LIMIT 1`,
-      [name],
+      [schema, name],
     );
     return (result.rows[0]?.def as string) ?? '';
   }
 
-  async getPrimaryKeys(database: string, table: string): Promise<string[]> {
+  async getPrimaryKeys(database: string, table: string, schema = 'public'): Promise<string[]> {
     const client = await this.getSessionClient(database);
     const result = await client.query(
       `SELECT kcu.column_name
@@ -165,20 +167,20 @@ export class PostgresAdapter implements IAdapter {
        JOIN information_schema.key_column_usage kcu
          ON tc.constraint_name = kcu.constraint_name
          AND tc.table_schema = kcu.table_schema
-       WHERE tc.table_schema = 'public' AND tc.table_name = $1
+       WHERE tc.table_schema = $1 AND tc.table_name = $2
          AND tc.constraint_type = 'PRIMARY KEY'
        ORDER BY kcu.ordinal_position`,
-      [table],
+      [schema, table],
     );
     return result.rows.map((r) => r.column_name as string);
   }
 
-  async updateCell(database: string, table: string, column: string, newValue: string | null, pkValues: Record<string, unknown>): Promise<void> {
+  async updateCell(database: string, table: string, column: string, newValue: string | null, pkValues: Record<string, unknown>, schema = 'public'): Promise<void> {
     const client = await this.getSessionClient(database);
     const pkEntries = Object.entries(pkValues);
     const params: unknown[] = [newValue];
     const where = pkEntries.map(([k, v], i) => { params.push(v); return `"${k}" = $${i + 2}`; }).join(' AND ');
-    await client.query(`UPDATE "${table}" SET "${column}" = $1 WHERE ${where}`, params);
+    await client.query(`UPDATE "${schema}"."${table}" SET "${column}" = $1 WHERE ${where}`, params);
   }
 
   private async getSessionClient(database: string): Promise<Client> {
