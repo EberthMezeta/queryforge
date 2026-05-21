@@ -14,6 +14,7 @@ interface WebviewMessage {
 
 export class QueryPanel {
   private static readonly panels = new Map<string, QueryPanel>();
+  private static counter = 0;
 
   private readonly panel: vscode.WebviewPanel;
   private pendingInit: { connectionName: string; database: string; query: string } | null = null;
@@ -28,11 +29,14 @@ export class QueryPanel {
     private readonly database: string,
     initialQuery: string,
     private readonly adapter: IAdapter,
+    private readonly panelKey: string,
+    viewColumn: vscode.ViewColumn = vscode.ViewColumn.One,
+    autoRun = false,
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'dbQuery',
       `${database} · ${config.name}`,
-      vscode.ViewColumn.One,
+      viewColumn,
       {
         enableScripts: true,
         localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'out')],
@@ -44,10 +48,11 @@ export class QueryPanel {
     this.panel.webview.html = this.buildHtml();
     this.panel.webview.onDidReceiveMessage(this.handleMessage.bind(this));
     this.panel.onDidDispose(() => {
-      QueryPanel.panels.delete(`${config.id}:${database}`);
+      QueryPanel.panels.delete(this.panelKey);
     });
 
-    QueryPanel.panels.set(`${config.id}:${database}`, this);
+    QueryPanel.panels.set(panelKey, this);
+    void autoRun;
   }
 
   static createOrShow(
@@ -67,8 +72,20 @@ export class QueryPanel {
       if (initialQuery) existing.send({ type: 'setQuery', query: initialQuery, autoRun });
       return;
     }
-    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter);
-    void autoRun;
+    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter, key, vscode.ViewColumn.One, autoRun);
+  }
+
+  static createNew(
+    context: vscode.ExtensionContext,
+    bookmarks: BookmarkStorage,
+    historyStorage: HistoryStorage,
+    config: ConnectionConfig,
+    database: string,
+    initialQuery: string,
+    adapter: IAdapter,
+  ): void {
+    const key = `${config.id}:${database}:${++QueryPanel.counter}`;
+    new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter, key, vscode.ViewColumn.Active, true);
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {

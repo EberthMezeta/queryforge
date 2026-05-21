@@ -78,6 +78,12 @@
         "title": "View DDL",
         "icon": "$(code)",
         "category": "DB Connection"
+      },
+      {
+        "command": "dbConnection.openTableInNewTab",
+        "title": "Open in New Tab",
+        "icon": "$(split-horizontal)",
+        "category": "DB Connection"
       }
     ],
     "menus": {
@@ -123,6 +129,11 @@
           "command": "dbConnection.viewDDL",
           "when": "viewItem == table || viewItem == view",
           "group": "inline"
+        },
+        {
+          "command": "dbConnection.openTableInNewTab",
+          "when": "viewItem == table || viewItem == view",
+          "group": "1_open@2"
         }
       ]
     }
