@@ -365,17 +365,18 @@ function exportQuery() {
   doExportQuery(sqlText, 'query');
 }
 
+type QueryExporter = (sql: string, base: string) => void;
+
+const QUERY_EXPORTERS: Record<string, QueryExporter> = {
+  sql: (s, b) => download(s, `${b}.sql`, 'text/plain'),
+  txt: (s, b) => download(s, `${b}.txt`, 'text/plain'),
+  md:  (s, b) => download('```sql\n' + s + '\n```\n', `${b}.md`, 'text/markdown'),
+  pdf: (s, b) => exportQueryPDF(s, b),
+};
+
 function doExportQuery(sqlText: string, baseName: string) {
   const fmt = (document.getElementById('export-query-fmt') as HTMLSelectElement).value;
-  if (fmt === 'sql') {
-    download(sqlText, `${baseName}.sql`, 'text/plain');
-  } else if (fmt === 'txt') {
-    download(sqlText, `${baseName}.txt`, 'text/plain');
-  } else if (fmt === 'md') {
-    download('```sql\n' + sqlText + '\n```\n', `${baseName}.md`, 'text/markdown');
-  } else if (fmt === 'pdf') {
-    exportQueryPDF(sqlText, baseName);
-  }
+  QUERY_EXPORTERS[fmt]?.(sqlText, baseName);
 }
 
 function exportQueryPDF(sqlText: string, baseName = 'query') {
@@ -524,62 +525,36 @@ function hide(id: string) { const el = document.getElementById(id); if (el) el.h
 
 // ── Message handler ───────────────────────────────────────────────────────────
 
+type MsgHandler = (msg: Record<string, unknown>) => void;
+
+const MESSAGE_HANDLERS: Record<string, MsgHandler> = {
+  init: (msg) => {
+    currentDatabase = msg.database as string;
+    currentTable    = (msg.tableName as string) || '';
+    currentSchema   = (msg.schema as string) || '';
+    primaryKeys     = (msg.primaryKeys as string[]) || [];
+    document.getElementById('conn-name')!.textContent = msg.connectionName as string;
+    document.getElementById('db-name')!.textContent   = msg.database as string;
+    updateBookmarks((msg.bookmarks as Bookmark[]) ?? []);
+    updateHistory((msg.history as HistoryEntry[]) ?? []);
+    if (msg.query) setEditorContent(msg.query as string);
+    if (msg.autoRun) runQuery();
+  },
+  setQuery:        (msg) => { setEditorContent(msg.query as string); if (msg.autoRun) runQuery(); },
+  queryResult:     (msg) => showResults(msg as unknown as QueryResult),
+  queryError:      (msg) => showError(msg.message as string),
+  loading:         ()    => showLoading(),
+  queryCancelled:  ()    => showCancelled(),
+  bookmarks:       (msg) => updateBookmarks(msg.items as Bookmark[]),
+  schema:          (msg) => applySchema(msg.schema as Record<string, string[]>),
+  history:         (msg) => updateHistory(msg.items as HistoryEntry[]),
+  reloadData:      ()    => { if (!editingCell) runQuery(); },
+  updateCellError: (msg) => showError(msg.message as string),
+};
+
 window.addEventListener('message', (event) => {
   const msg = event.data as Record<string, unknown>;
-  switch (msg.type) {
-    case 'init':
-      currentDatabase = msg.database as string;
-      currentTable = (msg.tableName as string) || '';
-      currentSchema = (msg.schema as string) || '';
-      primaryKeys = (msg.primaryKeys as string[]) || [];
-      document.getElementById('conn-name')!.textContent = msg.connectionName as string;
-      document.getElementById('db-name')!.textContent = msg.database as string;
-      updateBookmarks((msg.bookmarks as Bookmark[]) ?? []);
-      updateHistory((msg.history as HistoryEntry[]) ?? []);
-      if (msg.query) { setEditorContent(msg.query as string); runQuery(); }
-      break;
-
-    case 'setQuery':
-      setEditorContent(msg.query as string);
-      if (msg.autoRun) runQuery();
-      break;
-
-    case 'queryResult':
-      showResults(msg as unknown as QueryResult);
-      break;
-
-    case 'queryError':
-      showError(msg.message as string);
-      break;
-
-    case 'loading':
-      showLoading();
-      break;
-
-    case 'queryCancelled':
-      showCancelled();
-      break;
-
-    case 'bookmarks':
-      updateBookmarks(msg.items as Bookmark[]);
-      break;
-
-    case 'schema':
-      applySchema(msg.schema as Record<string, string[]>);
-      break;
-
-    case 'history':
-      updateHistory(msg.items as HistoryEntry[]);
-      break;
-
-    case 'reloadData':
-      if (!editingCell) runQuery();
-      break;
-
-    case 'updateCellError':
-      showError(msg.message as string);
-      break;
-  }
+  MESSAGE_HANDLERS[msg.type as string]?.(msg);
 });
 
 document.addEventListener('DOMContentLoaded', init);

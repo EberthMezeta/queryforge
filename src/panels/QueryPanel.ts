@@ -207,7 +207,6 @@ export class QueryPanel {
             schema[t.name] = [];
           }
         }),
-        8,
       );
       this.send({ type: 'schema', schema });
     } catch { /* non-critical */ }
@@ -259,12 +258,14 @@ function randomNonce(): string {
   return crypto.randomBytes(24).toString('base64url');
 }
 
-async function withConcurrency(tasks: (() => Promise<void>)[], limit: number): Promise<void> {
+const SCHEMA_CONCURRENCY = 8;
+
+async function withConcurrency(tasks: (() => Promise<void>)[]): Promise<void> {
   const pool = new Set<Promise<void>>();
   for (const task of tasks) {
     const p = task().finally(() => pool.delete(p));
     pool.add(p);
-    if (pool.size >= limit) await Promise.race(pool);
+    if (pool.size >= SCHEMA_CONCURRENCY) await Promise.race(pool);
   }
   await Promise.allSettled(pool);
 }

@@ -39,9 +39,6 @@ export function buildWebviewHtml(nonce: string, webviewUri: string): string {
         <button id="btn-export-query" class="btn btn-sm" title="Export current query">📤 Export Query</button>
       </div>
       <div class="toolbar-divider"></div>
-      <label class="limit-label">LIMIT
-        <input type="number" id="limit-input" value="150" min="1" max="100000">
-      </label>
       <button id="run-btn" class="btn btn-primary">▶ Run <kbd>Ctrl+Enter</kbd></button>
     </div>
   </div>
