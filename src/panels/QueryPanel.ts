@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
 import { IAdapter, isSchemaAdapter } from '../db/IAdapter';
 import { ConnectionConfig } from '../types';
 import { BookmarkStorage } from '../storage/BookmarkStorage';
@@ -23,7 +24,7 @@ export class QueryPanel {
   private static counter = 0;
 
   private readonly panel: vscode.WebviewPanel;
-  private pendingInit: { connectionName: string; database: string; query: string } | null = null;
+  private pendingInit: { connectionName: string; database: string; query: string; autoRun: boolean } | null = null;
   private cancelFn: (() => void) | null = null;
   private runningDatabase: string | undefined;
 
@@ -52,7 +53,7 @@ export class QueryPanel {
       },
     );
 
-    this.pendingInit = { connectionName: config.name, database, query: initialQuery };
+    this.pendingInit = { connectionName: config.name, database, query: initialQuery, autoRun };
     this.panel.webview.html = this.buildHtml();
     this.panel.webview.onDidReceiveMessage(this.handleMessage.bind(this));
     this.panel.onDidDispose(() => {
@@ -60,7 +61,6 @@ export class QueryPanel {
     });
 
     QueryPanel.panels.set(panelKey, this);
-    void autoRun;
   }
 
   static createOrShow(
@@ -198,8 +198,8 @@ export class QueryPanel {
     try {
       const tables = await this.adapter.getTables(database);
       const schema: Record<string, string[]> = {};
-      await Promise.allSettled(
-        tables.map(async (t) => {
+      await withConcurrency(
+        tables.map((t) => async () => {
           try {
             const cols = await this.adapter.getColumns(database, t.name, t.schema);
             schema[t.name] = cols.map((c) => c.name);
@@ -207,6 +207,7 @@ export class QueryPanel {
             schema[t.name] = [];
           }
         }),
+        8,
       );
       this.send({ type: 'schema', schema });
     } catch { /* non-critical */ }
@@ -255,6 +256,15 @@ export class QueryPanel {
 }
 
 function randomNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  return Array.from({ length: 32 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+async function withConcurrency(tasks: (() => Promise<void>)[], limit: number): Promise<void> {
+  const pool = new Set<Promise<void>>();
+  for (const task of tasks) {
+    const p = task().finally(() => pool.delete(p));
+    pool.add(p);
+    if (pool.size >= limit) await Promise.race(pool);
+  }
+  await Promise.allSettled(pool);
 }

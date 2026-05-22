@@ -16,6 +16,7 @@ export interface ConnectionConfig {
   serviceName?: string;
   // SQL Server
   encrypt?: boolean;
+  trustServerCertificate?: boolean;
   // GraphQL / MongoDB URI
   url?: string;
   // GraphQL custom headers

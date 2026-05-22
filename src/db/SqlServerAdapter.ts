@@ -17,7 +17,7 @@ export class SqlServerAdapter extends BaseAdapter implements ISchemaAdapter, IPr
       password: this.config.password,
       database: this.config.database || 'master',
       options: {
-        trustServerCertificate: true,
+        trustServerCertificate: this.config.trustServerCertificate ?? false,
         encrypt: this.config.encrypt ?? false,
         connectTimeout: 10000,
       },

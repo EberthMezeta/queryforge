@@ -8,7 +8,7 @@ import { AddConnectionPanel } from './panels/AddConnectionPanel';
 import { ConnectionItem, DatabaseItem, TableItem, ProcedureItem } from './tree/TreeItems';
 import { isSchemaAdapter, isProcedureAdapter } from './db/IAdapter';
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const storage = new ConnectionStorage(context);
   const bookmarks = new BookmarkStorage(context);
   const historyStorage = new HistoryStorage(context);
@@ -110,7 +110,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  const savedConnections = storage.getConnections();
+  const savedConnections = await storage.getConnections();
   if (savedConnections.length > 0) {
     Promise.allSettled(
       savedConnections.map((config) => provider.getOrConnect(config)),

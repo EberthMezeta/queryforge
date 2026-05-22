@@ -2,27 +2,59 @@ import * as vscode from 'vscode';
 import { ConnectionConfig } from '../types';
 
 const STORAGE_KEY = 'dbConnection.connections';
+const SECRET_PREFIX = 'db.password.';
+
+type StoredConfig = Omit<ConnectionConfig, 'password'>;
 
 export class ConnectionStorage {
   constructor(private readonly context: vscode.ExtensionContext) {}
 
-  getConnections(): ConnectionConfig[] {
-    return this.context.globalState.get<ConnectionConfig[]>(STORAGE_KEY, []);
+  async getConnections(): Promise<ConnectionConfig[]> {
+    const stored = this.context.globalState.get<(StoredConfig & { password?: string })[]>(STORAGE_KEY, []);
+    let needsCleanup = false;
+
+    const configs = await Promise.all(stored.map(async (entry) => {
+      const { password: legacyPwd, ...safe } = entry;
+
+      if (legacyPwd) {
+        // Migrate plaintext password from globalState to OS-level SecretStorage
+        await this.context.secrets.store(`${SECRET_PREFIX}${entry.id}`, legacyPwd);
+        needsCleanup = true;
+        return { ...safe, password: legacyPwd } as ConnectionConfig;
+      }
+
+      const password = await this.context.secrets.get(`${SECRET_PREFIX}${entry.id}`);
+      return { ...safe, ...(password ? { password } : {}) } as ConnectionConfig;
+    }));
+
+    if (needsCleanup) {
+      const clean = stored.map(({ password: _, ...s }) => s);
+      await this.context.globalState.update(STORAGE_KEY, clean);
+    }
+
+    return configs;
   }
 
   async saveConnection(config: ConnectionConfig): Promise<void> {
-    const connections = this.getConnections();
-    const idx = connections.findIndex(c => c.id === config.id);
-    if (idx >= 0) {
-      connections[idx] = config;
-    } else {
-      connections.push(config);
+    const { password, ...safe } = config;
+
+    if (password !== undefined) {
+      await this.context.secrets.store(`${SECRET_PREFIX}${config.id}`, password);
     }
-    await this.context.globalState.update(STORAGE_KEY, connections);
+
+    const stored = this.context.globalState.get<StoredConfig[]>(STORAGE_KEY, []);
+    const idx = stored.findIndex(c => c.id === config.id);
+    if (idx >= 0) {
+      stored[idx] = safe;
+    } else {
+      stored.push(safe);
+    }
+    await this.context.globalState.update(STORAGE_KEY, stored);
   }
 
   async deleteConnection(id: string): Promise<void> {
-    const connections = this.getConnections().filter(c => c.id !== id);
-    await this.context.globalState.update(STORAGE_KEY, connections);
+    await this.context.secrets.delete(`${SECRET_PREFIX}${id}`);
+    const stored = this.context.globalState.get<StoredConfig[]>(STORAGE_KEY, []).filter(c => c.id !== id);
+    await this.context.globalState.update(STORAGE_KEY, stored);
   }
 }

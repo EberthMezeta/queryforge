@@ -43,7 +43,8 @@ export class ConnectionsProvider implements vscode.TreeDataProvider<AnyItem> {
 
   async getChildren(element?: AnyItem): Promise<AnyItem[]> {
     if (!element) {
-      return this.storage.getConnections().map((c) => {
+      const connections = await this.storage.getConnections();
+      return connections.map((c) => {
         const adapter = this.adapters.get(c.id);
         return new ConnectionItem(c, adapter?.isConnected() ?? false);
       });

@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 
+const MAX_BOOKMARKS = 100;
+const MAX_SQL_LENGTH = 10_000;
+
 export interface Bookmark {
   id: string;
   name: string;
@@ -22,10 +25,10 @@ export class BookmarkStorage {
     const bookmark: Bookmark = {
       id: Date.now().toString(),
       name: name.trim(),
-      sql,
+      sql: sql.length > MAX_SQL_LENGTH ? sql.slice(0, MAX_SQL_LENGTH) : sql,
       createdAt: Date.now(),
     };
-    const all = [bookmark, ...this.getAll(connectionId, database)];
+    const all = [bookmark, ...this.getAll(connectionId, database)].slice(0, MAX_BOOKMARKS);
     this.context.globalState.update(this.key(connectionId, database), all);
     return all;
   }

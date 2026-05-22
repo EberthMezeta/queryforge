@@ -1,4 +1,5 @@
 import esbuild from 'esbuild';
+import { copyFileSync, mkdirSync } from 'fs';
 
 const watch = process.argv.includes('--watch');
 
@@ -36,6 +37,8 @@ async function build() {
   } else {
     await Promise.all([extensionCtx.rebuild(), webviewCtx.rebuild()]);
     await Promise.all([extensionCtx.dispose(), webviewCtx.dispose()]);
+    mkdirSync('out', { recursive: true });
+    copyFileSync('node_modules/sql.js/dist/sql-wasm.wasm', 'out/sql-wasm.wasm');
     console.log('Build complete.');
   }
 }

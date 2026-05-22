@@ -13,7 +13,7 @@ export class SqliteAdapter extends BaseAdapter implements ISchemaAdapter {
 
   async connect(): Promise<void> {
     if (!this.config.filename) throw new Error('SQLite filename is required');
-    const wasmPath = path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+    const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
     const SQL = await initSqlJs({ locateFile: () => wasmPath });
     const data = fs.readFileSync(this.config.filename);
     this.db = new SQL.Database(data);

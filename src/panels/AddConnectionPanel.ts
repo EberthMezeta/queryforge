@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
 import { ConnectionStorage } from '../storage/ConnectionStorage';
 import { ConnectionsProvider } from '../tree/ConnectionsProvider';
 import { createAdapter } from '../db/index';
@@ -92,8 +93,7 @@ export class AddConnectionPanel {
 }
 
 function randomNonce(): string {
-  const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  return Array.from({ length: 32 }, () => c[Math.floor(Math.random() * c.length)]).join('');
+  return crypto.randomBytes(24).toString('base64url');
 }
 
 function buildHtml(nonce: string): string {
@@ -267,6 +267,11 @@ function buildHtml(nonce: string): string {
         <input type="checkbox" id="f-encrypt">
         <label for="f-encrypt" style="text-transform:none;font-size:13px;color:inherit">Encrypt connection (Azure SQL)</label>
       </div>
+      <!-- MSSQL: trust server certificate -->
+      <div class="checkbox-row" id="trust-cert-group" hidden>
+        <input type="checkbox" id="f-trust-cert">
+        <label for="f-trust-cert" style="text-transform:none;font-size:13px;color:inherit">Trust server certificate <span style="opacity:.6">(self-signed / dev only)</span></label>
+      </div>
     </div>
 
     <!-- SQLite -->
@@ -345,8 +350,9 @@ function buildHtml(nonce: string): string {
       // Oracle service name
       document.getElementById('service-group').hidden = !isOracle;
 
-      // MSSQL encrypt
+      // MSSQL encrypt / trust cert
       document.getElementById('encrypt-group').hidden = !isMssql;
+      document.getElementById('trust-cert-group').hidden = !isMssql;
     }
   }
 
@@ -389,10 +395,11 @@ function buildHtml(nonce: string): string {
       return { name:name, type:'redis', host:host, port:port, password:pass };
     }
 
-    var db      = document.getElementById('f-db').value.trim();
-    var encrypt = document.getElementById('f-encrypt') && document.getElementById('f-encrypt').checked;
+    var db        = document.getElementById('f-db').value.trim();
+    var encrypt   = document.getElementById('f-encrypt') && document.getElementById('f-encrypt').checked;
+    var trustCert = document.getElementById('f-trust-cert') && document.getElementById('f-trust-cert').checked;
     var cfg = { name:name, type:dbType, host:host, port:port, user:user, password:pass, database:db||undefined };
-    if (dbType === 'mssql') cfg.encrypt = encrypt;
+    if (dbType === 'mssql') { cfg.encrypt = encrypt; cfg.trustServerCertificate = trustCert; }
     return cfg;
   }
 
