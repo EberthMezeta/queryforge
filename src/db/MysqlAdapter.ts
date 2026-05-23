@@ -160,11 +160,12 @@ export class MysqlAdapter extends BaseAdapter implements ISchemaAdapter, IProced
   async updateCell(database: string, table: string, column: string, newValue: string | null, pkValues: Record<string, unknown>): Promise<void> {
     this.assertConnected();
     const pkEntries = Object.entries(pkValues);
-    const params: unknown[] = [newValue, ...pkEntries.map(([, v]) => v)];
+    if (!pkEntries.length) throw new Error('Cannot update row without primary key values');
     const where = pkEntries.map(([k]) => `\`${k}\` = ?`).join(' AND ');
+    const params: unknown[] = [newValue, ...pkEntries.map(([, v]) => v)];
     const conn = await this.pool!.getConnection();
     try {
-      await conn.query(`UPDATE \`${database}\`.\`${table}\` SET \`${column}\` = ? WHERE ${where}`, params);
+      await conn.execute(`UPDATE \`${database}\`.\`${table}\` SET \`${column}\` = ? WHERE ${where}`, params as import('mysql2').ExecuteValues);
     } finally {
       conn.release();
     }

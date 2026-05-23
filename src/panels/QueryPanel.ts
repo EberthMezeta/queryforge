@@ -75,7 +75,9 @@ export class QueryPanel {
     tableName = '',
     schema = '',
   ): void {
-    const key = `${config.id}:${database}`;
+    const key = tableName
+      ? `${config.id}:${database}:${schema}:${tableName}`
+      : `${config.id}:${database}`;
     const existing = QueryPanel.panels.get(key);
     if (existing) {
       existing.panel.reveal();
