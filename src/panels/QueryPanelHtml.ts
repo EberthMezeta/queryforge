@@ -79,6 +79,7 @@ export function buildWebviewHtml(nonce: string, webviewUri: string): string {
       <div class="export-btns">
         <button id="export-csv" class="btn btn-sm">CSV</button>
         <button id="export-json" class="btn btn-sm">JSON</button>
+        <button id="export-excel" class="btn btn-sm">Excel</button>
         <button id="export-pdf" class="btn btn-sm">PDF</button>
       </div>
     </div>

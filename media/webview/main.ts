@@ -69,6 +69,7 @@ function init() {
   document.getElementById('run-btn')!.addEventListener('click', runQuery);
   document.getElementById('export-csv')!.addEventListener('click', exportCSV);
   document.getElementById('export-json')!.addEventListener('click', exportJSON);
+  document.getElementById('export-excel')!.addEventListener('click', exportExcel);
   document.getElementById('export-pdf')!.addEventListener('click', exportPDF);
 
   document.getElementById('cancel-btn')!.addEventListener('click', () => {
@@ -391,7 +392,7 @@ function exportQueryPDF(sqlText: string, baseName = 'query') {
 // ── Export (uses filtered rows) ───────────────────────────────────────────────
 
 function setExportButtons(enabled: boolean) {
-  ['export-csv', 'export-json', 'export-pdf'].forEach((id) => {
+  ['export-csv', 'export-json', 'export-excel', 'export-pdf'].forEach((id) => {
     (document.getElementById(id) as HTMLButtonElement).disabled = !enabled;
   });
 }
@@ -410,6 +411,38 @@ function exportCSV() {
 function exportJSON() {
   if (!currentData) return;
   download(JSON.stringify(filteredRows(), null, 2), 'query_results.json', 'application/json');
+}
+
+function exportExcel() {
+  if (!currentData) return;
+  const rows = filteredRows();
+  const { columns } = currentData;
+
+  const xmlEsc = (v: string) =>
+    v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  const cell = (val: unknown): string => {
+    if (val === null || val === undefined) return '<Cell><Data ss:Type="String"></Data></Cell>';
+    const str = String(val);
+    const type = !isNaN(Number(str)) && str.trim() !== '' ? 'Number' : 'String';
+    return `<Cell><Data ss:Type="${type}">${xmlEsc(str)}</Data></Cell>`;
+  };
+
+  const headerRow = `<Row>${columns.map((c) => `<Cell><Data ss:Type="String">${xmlEsc(c)}</Data></Cell>`).join('')}</Row>`;
+  const dataRows  = rows.map((r) => `<Row>${columns.map((c) => cell(r[c])).join('')}</Row>`).join('');
+
+  const xml = [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<?mso-application progid="Excel.Sheet"?>`,
+    `<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"`,
+    ` xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">`,
+    `<Worksheet ss:Name="Results"><Table>`,
+    headerRow,
+    dataRows,
+    `</Table></Worksheet></Workbook>`,
+  ].join('');
+
+  download(xml, 'query_results.xls', 'application/vnd.ms-excel');
 }
 
 function exportPDF() {
