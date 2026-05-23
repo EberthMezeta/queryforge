@@ -26,6 +26,7 @@ export function buildWebviewHtml(nonce: string, webviewUri: string): string {
     </div>
     <div class="toolbar-right">
       <button id="btn-copy-query" class="btn btn-sm" title="Copy current query">📋 Copy</button>
+      <button id="btn-format-query" class="btn btn-sm" title="Format query (Ctrl+Alt+F)">✨ Format</button>
       <button id="btn-save-query" class="btn btn-sm" title="Save current query">⭐ Save</button>
       <button id="btn-bookmarks" class="btn btn-sm" title="Saved queries">☰ <span id="bookmark-count">0</span></button>
       <button id="btn-history" class="btn btn-sm" title="Query history (Alt+↑/↓)">⏱ <span id="history-count">0</span></button>

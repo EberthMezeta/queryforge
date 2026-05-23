@@ -118,7 +118,10 @@ kbd{
   border-bottom:2px solid var(--vscode-panel-border);
   border-right:1px solid var(--vscode-panel-border);
   position:sticky;top:0;font-weight:600;white-space:nowrap;z-index:1;
+  cursor:pointer;user-select:none;
 }
+#results-table th:hover{background:var(--vscode-list-hoverBackground)}
+.sort-arrow{color:var(--vscode-textLink-foreground);margin-left:4px;font-size:10px}
 #results-table td{
   padding:4px 10px;
   border-bottom:1px solid var(--vscode-panel-border);
@@ -181,4 +184,12 @@ kbd{
   padding:0 8px;font-size:13px;font-weight:600;
 }
 .cell-save-btn:hover{background:var(--vscode-button-hoverBackground)}
+#toast{
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(12px);
+  background:var(--vscode-editorWidget-background);color:var(--vscode-editor-foreground);
+  border:1px solid var(--vscode-panel-border);
+  padding:7px 16px;border-radius:6px;font-size:12px;
+  opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;z-index:999;
+}
+#toast.toast-visible{opacity:1;transform:translateX(-50%) translateY(0)}
 `;

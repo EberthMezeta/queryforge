@@ -36,6 +36,9 @@ let historyEntries: HistoryEntry[] = [];
 let historyIndex = -1;
 let currentPage = 0;
 let filterText = '';
+let sortCol: string | null = null;
+let sortDir: 'asc' | 'desc' = 'asc';
+let baseQuery = '';
 let editingCell: { td: HTMLElement; originalContent: string } | null = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -60,6 +63,7 @@ function init() {
           { key: 'Mod-Enter', run: () => { runQuery(); return true; } },
           { key: 'Alt-ArrowUp', run: () => { navigateHistory(1); return true; } },
           { key: 'Alt-ArrowDown', run: () => { navigateHistory(-1); return true; } },
+          { key: 'Ctrl-Alt-f', run: () => { formatQuery(); return true; } },
         ]),
       ],
     }),
@@ -84,6 +88,7 @@ function init() {
     renderPage();
   });
 
+  document.getElementById('btn-format-query')!.addEventListener('click', formatQuery);
   document.getElementById('btn-copy-query')!.addEventListener('click', () => {
     const sqlText = editor.state.doc.toString().trim();
     if (sqlText) copyText(sqlText, document.getElementById('btn-copy-query')!);
@@ -100,6 +105,46 @@ function init() {
   document.getElementById('bookmark-name-input')!.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') confirmSave();
     if (e.key === 'Escape') closeSaveForm();
+  });
+
+  document.getElementById('t-head')!.addEventListener('click', (e) => {
+    const th = (e.target as HTMLElement).closest('th[data-col]') as HTMLElement | null;
+    if (!th) return;
+    const col = th.dataset.col!;
+    if (sortCol === col) {
+      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortCol = col;
+      sortDir = 'asc';
+    }
+    currentPage = 0;
+    renderHeaders();
+    renderPage();
+    if (baseQuery) {
+      setEditorContent(`${baseQuery}\nORDER BY "${col}" ${sortDir.toUpperCase()}`);
+    }
+  });
+
+  document.getElementById('t-body')!.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const tr = (e.target as HTMLElement).closest('tr') as HTMLElement | null;
+    if (!tr || !currentData) return;
+    const rowIndex = Array.from(tr.parentElement!.children).indexOf(tr);
+    const rows = filteredRows();
+    const row = rows[currentPage * PAGE_SIZE + rowIndex];
+    if (!row) return;
+    const table = currentTable || 'table_name';
+    const cols = currentData.columns.map((c) => `"${c}"`).join(', ');
+    const vals = currentData.columns.map((c) => {
+      const v = row[c];
+      if (v === null || v === undefined) return 'NULL';
+      if (typeof v === 'number') return String(v);
+      return `'${String(v).replace(/'/g, "''")}'`;
+    }).join(', ');
+    const insert = `INSERT INTO "${table}" (${cols}) VALUES (${vals});`;
+    navigator.clipboard.writeText(insert).then(() => {
+      showToast('INSERT copied to clipboard');
+    }).catch(() => {});
   });
 
   document.getElementById('t-body')!.addEventListener('click', (e) => {
@@ -144,6 +189,7 @@ function init() {
 function runQuery() {
   const sqlText = editor.state.doc.toString().trim();
   if (!sqlText) return;
+  baseQuery = sqlText.replace(/\s+ORDER\s+BY\s+[\s\S]*$/i, '').trim() || sqlText;
   historyIndex = -1;
   showLoading();
   vscode.postMessage({ type: 'runQuery', sql: sqlText, database: currentDatabase });
@@ -164,15 +210,15 @@ function showResults(data: QueryResult) {
   currentData = data;
   currentPage = 0;
   filterText = '';
+  sortCol = null;
+  sortDir = 'asc';
   (document.getElementById('filter-input') as HTMLInputElement).value = '';
 
   hide('loading-section'); hide('error-section');
 
   document.getElementById('query-time')!.textContent = `${data.duration} ms`;
 
-  document.getElementById('t-head')!.innerHTML =
-    data.columns.map((c) => `<th>${esc(c)}</th>`).join('');
-
+  renderHeaders();
   renderPage();
   setExportButtons(data.rows.length > 0);
   show('results-section');
@@ -191,16 +237,41 @@ function setEditorContent(content: string) {
 
 // ── Pagination + Filter ───────────────────────────────────────────────────────
 
+function renderHeaders() {
+  if (!currentData) return;
+  document.getElementById('t-head')!.innerHTML = currentData.columns
+    .map((c) => {
+      const active = c === sortCol;
+      const arrow = active ? `<span class="sort-arrow">${sortDir === 'asc' ? '▲' : '▼'}</span>` : '';
+      return `<th data-col="${esc(c)}">${esc(c)}${arrow}</th>`;
+    })
+    .join('');
+}
+
 function filteredRows(): Record<string, unknown>[] {
   if (!currentData) return [];
-  if (!filterText) return currentData.rows;
-  const lower = filterText.toLowerCase();
-  return currentData.rows.filter((row) =>
-    currentData!.columns.some((col) => {
-      const v = row[col];
-      return v !== null && v !== undefined && String(v).toLowerCase().includes(lower);
-    }),
-  );
+  let rows: Record<string, unknown>[] = currentData.rows;
+  if (filterText) {
+    const lower = filterText.toLowerCase();
+    rows = rows.filter((row) =>
+      currentData!.columns.some((col) => {
+        const v = row[col];
+        return v !== null && v !== undefined && String(v).toLowerCase().includes(lower);
+      }),
+    );
+  }
+  if (sortCol) {
+    const col = sortCol;
+    rows = [...rows].sort((a, b) => {
+      const av = a[col], bv = b[col];
+      if (av === null || av === undefined) return 1;
+      if (bv === null || bv === undefined) return -1;
+      const an = Number(av), bn = Number(bv);
+      const cmp = !isNaN(an) && !isNaN(bn) ? an - bn : String(av).localeCompare(String(bv));
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }
+  return rows;
 }
 
 function renderPage() {
@@ -356,6 +427,52 @@ function relativeTime(ts: number): string {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
   return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+// ── Query Formatter ───────────────────────────────────────────────────────────
+
+const SQL_KEYWORDS = [
+  'SELECT','DISTINCT','FROM','WHERE','AND','OR','NOT','IN','EXISTS','BETWEEN','LIKE','IS','NULL',
+  'JOIN','INNER','LEFT','RIGHT','FULL','OUTER','CROSS','ON','USING',
+  'GROUP BY','ORDER BY','HAVING','LIMIT','OFFSET','UNION','ALL','EXCEPT','INTERSECT',
+  'INSERT INTO','INSERT','INTO','VALUES','UPDATE','SET','DELETE FROM','DELETE',
+  'CREATE TABLE','CREATE INDEX','CREATE VIEW','ALTER TABLE','DROP TABLE','DROP INDEX',
+  'WITH','AS','CASE','WHEN','THEN','ELSE','END','CAST','COALESCE','NULLIF',
+  'COUNT','SUM','AVG','MIN','MAX','UPPER','LOWER','TRIM','LENGTH','SUBSTRING',
+  'ASC','DESC','RETURNING','PRIMARY KEY','FOREIGN KEY','REFERENCES','DEFAULT',
+  'NOT NULL','UNIQUE','CHECK','INDEX','CONSTRAINT','BEGIN','COMMIT','ROLLBACK',
+];
+
+function formatQuery() {
+  const raw = editor.state.doc.toString().trim();
+  if (!raw) return;
+
+  // Uppercase keywords
+  let sql = raw;
+  const sorted = [...SQL_KEYWORDS].sort((a, b) => b.length - a.length);
+  for (const kw of sorted) {
+    sql = sql.replace(new RegExp(`\\b${kw}\\b`, 'gi'), kw);
+  }
+
+  // Normalize whitespace
+  sql = sql.replace(/\s+/g, ' ').trim();
+
+  // Line breaks before major clauses
+  const BREAKS = ['SELECT','FROM','WHERE','GROUP BY','ORDER BY','HAVING','LIMIT','OFFSET',
+                  'INNER JOIN','LEFT JOIN','RIGHT JOIN','FULL JOIN','CROSS JOIN','JOIN',
+                  'UNION ALL','UNION','EXCEPT','INTERSECT','INSERT INTO','VALUES','UPDATE',
+                  'SET','DELETE FROM','WITH'];
+  const breakRe = new RegExp(`\\b(${BREAKS.map((k) => k.replace(/ /g, '\\s+')).join('|')})\\b`, 'g');
+  sql = sql.replace(breakRe, '\n$1');
+
+  // AND / OR on new indented line inside WHERE/HAVING
+  sql = sql.replace(/\b(AND|OR)\b/g, '\n  $1');
+
+  // Clean leading newline
+  sql = sql.replace(/^\n+/, '').trim();
+
+  setEditorContent(sql);
+  showToast('Query formatted');
 }
 
 // ── Export Query ──────────────────────────────────────────────────────────────
@@ -525,6 +642,18 @@ function commitCellEdit(column: string, pkValues: Record<string, unknown>, newVa
     newValue: newValue === '' ? null : newValue,
     pkValues,
   });
+}
+
+function showToast(msg: string) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.classList.add('toast-visible');
+  setTimeout(() => toast!.classList.remove('toast-visible'), 2000);
 }
 
 function copyText(text: string, btn: HTMLElement) {
