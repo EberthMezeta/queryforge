@@ -1,11 +1,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const oracledb = require('oracledb');
 import { BaseAdapter } from './BaseAdapter';
 import { ISchemaAdapter, IProcedureAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
 
-oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
+let _oracledb: any;
+function getOracleDb(): any {
+  if (!_oracledb) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      _oracledb = require('oracledb');
+      _oracledb.outFormat = _oracledb.OUT_FORMAT_OBJECT;
+    } catch {
+      throw new Error('Oracle Database support requires oracledb installed separately. Run: npm install oracledb');
+    }
+  }
+  return _oracledb;
+}
 
 export class OracleAdapter extends BaseAdapter implements ISchemaAdapter, IProcedureAdapter {
   private conn: any = null;
@@ -14,6 +24,7 @@ export class OracleAdapter extends BaseAdapter implements ISchemaAdapter, IProce
   constructor(private readonly config: ConnectionConfig) { super(); }
 
   async connect(): Promise<void> {
+    const oracledb = getOracleDb();
     const connectString = `${this.config.host || '127.0.0.1'}:${this.config.port || 1521}/${this.config.serviceName || this.config.database || 'XEPDB1'}`;
     this.conn = await oracledb.getConnection({ user: this.config.user, password: this.config.password, connectString });
     this.connected = true;

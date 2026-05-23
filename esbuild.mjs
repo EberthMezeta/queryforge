@@ -15,7 +15,7 @@ async function build() {
     ...baseConfig,
     entryPoints: ['src/extension.ts'],
     outfile: 'out/extension.js',
-    external: ['vscode', 'pg', 'mysql2', 'sql.js', 'mssql', 'oracledb', 'mongodb', 'redis'],
+    external: ['vscode', 'oracledb'],
     format: 'cjs',
     platform: 'node',
     target: 'node20',
