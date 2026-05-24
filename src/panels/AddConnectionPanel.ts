@@ -186,24 +186,11 @@ function buildHtml(nonce: string): string {
     #status.err{background:var(--vscode-inputValidation-errorBackground);border:1px solid var(--vscode-inputValidation-errorBorder);color:var(--vscode-errorForeground)}
     .action-btns{display:flex;gap:10px;flex-shrink:0}
     .hint{font-size:11px;color:var(--vscode-descriptionForeground);margin-top:3px}
-    .conn-str-wrap{margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--vscode-panel-border)}
-    .or-divider{text-align:center;color:var(--vscode-descriptionForeground);font-size:11px;margin-bottom:20px;position:relative}
-    .or-divider::before,.or-divider::after{content:'';position:absolute;top:50%;width:42%;height:1px;background:var(--vscode-panel-border)}
-    .or-divider::before{left:0}.or-divider::after{right:0}
   </style>
 </head>
 <body>
 <div class="container">
   <h2>Add Connection</h2>
-
-  <div class="conn-str-wrap">
-    <div class="form-group">
-      <label>Connection String <span>(paste to auto-fill)</span></label>
-      <input id="f-conn-str" type="text" placeholder="postgres://user:pass@host:5432/dbname" autocomplete="off">
-      <div class="hint">Supports PostgreSQL, MySQL, SQL Server, MongoDB, Redis, Oracle, SQLite</div>
-    </div>
-  </div>
-  <div class="or-divider">or configure manually</div>
 
   <div class="db-types">
     <div class="db-card selected" data-type="mysql">
@@ -366,60 +353,6 @@ function buildHtml(nonce: string): string {
       // MSSQL encrypt / trust cert
       document.getElementById('encrypt-group').hidden = !isMssql;
       document.getElementById('trust-cert-group').hidden = !isMssql;
-    }
-  }
-
-  document.getElementById('f-conn-str').addEventListener('input', function() {
-    parseConnectionString(this.value);
-  });
-
-  function parseConnectionString(str) {
-    str = str.trim();
-    if (!str) return;
-    var url;
-    try { url = new URL(str); } catch(e) { return; }
-
-    var proto = url.protocol.replace(':', '').toLowerCase();
-    var type =
-      (proto === 'postgres' || proto === 'postgresql') ? 'postgres' :
-      (proto === 'mysql')                               ? 'mysql'    :
-      (proto === 'mssql' || proto === 'sqlserver')      ? 'mssql'    :
-      (proto === 'mongodb' || proto === 'mongodb+srv')  ? 'mongodb'  :
-      (proto === 'redis' || proto === 'rediss')         ? 'redis'    :
-      (proto === 'sqlite' || proto === 'sqlite3')       ? 'sqlite'   :
-      (proto === 'oracle')                              ? 'oracle'   : null;
-    if (!type) return;
-
-    document.querySelectorAll('.db-card').forEach(function(c){ c.classList.remove('selected'); });
-    var card = document.querySelector('.db-card[data-type="' + type + '"]');
-    if (card) card.classList.add('selected');
-    dbType = type;
-    switchForm();
-
-    if (type === 'sqlite') {
-      document.getElementById('f-file').value = url.pathname;
-      return;
-    }
-
-    var host = url.hostname || '127.0.0.1';
-    var port = url.port ? parseInt(url.port) : (PORTS[type] || 0);
-    var user = url.username ? decodeURIComponent(url.username) : '';
-    var pass = url.password ? decodeURIComponent(url.password) : '';
-    var db   = url.pathname ? url.pathname.replace(/^\//, '') : '';
-
-    document.getElementById('f-host').value = host;
-    document.getElementById('f-port').value = port;
-    document.getElementById('f-user').value = user;
-    document.getElementById('f-pass').value = pass;
-    if (type === 'oracle') {
-      document.getElementById('f-service').value = db || 'XEPDB1';
-    } else if (type !== 'redis') {
-      document.getElementById('f-db').value = db;
-    }
-
-    var nameEl = document.getElementById('f-name');
-    if (!nameEl.value) {
-      nameEl.value = (db || host) + ' (' + type + ')';
     }
   }
 
