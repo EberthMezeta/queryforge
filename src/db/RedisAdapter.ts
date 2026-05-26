@@ -29,6 +29,8 @@ export class RedisAdapter extends BaseAdapter implements IAdapter {
 
   isConnected(): boolean { return this.connected; }
 
+  async cancelQuery(_database?: string): Promise<void> { /* Redis commands are atomic; no in-flight query to cancel */ }
+
   buildDefaultQuery(table: string, _schema?: string): string {
     return `TYPE ${table}\nGET ${table}`;
   }

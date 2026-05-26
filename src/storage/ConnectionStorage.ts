@@ -1,5 +1,5 @@
-import * as vscode from 'vscode';
 import { ConnectionConfig } from '../types';
+import { IStorageContext } from './IStorageContext';
 
 const STORAGE_KEY = 'dbConnection.connections';
 const SECRET_PREFIX = 'db.password.';
@@ -7,7 +7,7 @@ const SECRET_PREFIX = 'db.password.';
 type StoredConfig = Omit<ConnectionConfig, 'password'>;
 
 export class ConnectionStorage {
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(private readonly context: IStorageContext) {}
 
   async getConnections(): Promise<ConnectionConfig[]> {
     const stored = this.context.globalState.get<(StoredConfig & { password?: string })[]>(STORAGE_KEY, []);
@@ -17,7 +17,6 @@ export class ConnectionStorage {
       const { password: legacyPwd, ...safe } = entry;
 
       if (legacyPwd) {
-        // Migrate plaintext password from globalState to OS-level SecretStorage
         await this.context.secrets.store(`${SECRET_PREFIX}${entry.id}`, legacyPwd);
         needsCleanup = true;
         return { ...safe, password: legacyPwd } as ConnectionConfig;

@@ -1,24 +1,11 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import { IAdapter, isSchemaAdapter } from '../db/IAdapter';
-import { ConnectionConfig, ColumnInfo } from '../types';
+import { ConnectionConfig, ColumnInfo, WebviewMessage } from '../types';
 import { BookmarkStorage } from '../storage/BookmarkStorage';
 import { HistoryStorage } from '../storage/HistoryStorage';
 import { buildWebviewHtml } from './QueryPanelHtml';
-
-interface WebviewMessage {
-  type: 'ready' | 'runQuery' | 'saveBookmark' | 'deleteBookmark' | 'cancelQuery' | 'clearHistory' | 'updateCell' | 'insertRow' | 'deleteRow' | 'deleteRows' | 'getTableMeta';
-  sqls?: string[];
-  sql?: string;
-  database?: string;
-  name?: string;
-  id?: string;
-  table?: string;
-  column?: string;
-  newValue?: string | null;
-  pkValues?: Record<string, unknown>;
-  schema?: string;
-}
+import { SCHEMA_CONCURRENCY, SERVER_PAGE_SIZE } from '../constants';
 
 export class QueryPanel {
   private static readonly panels = new Map<string, QueryPanel>();
@@ -56,7 +43,7 @@ export class QueryPanel {
 
     this.pendingInit = { connectionName: config.name, database, query: initialQuery, autoRun };
     this.panel.webview.html = this.buildHtml();
-    this.panel.webview.onDidReceiveMessage(this.handleMessage.bind(this));
+    this.panel.webview.onDidReceiveMessage((msg: WebviewMessage) => this.handleMessage(msg));
     this.panel.onDidDispose(() => {
       QueryPanel.panels.delete(this.panelKey);
     });
@@ -103,152 +90,177 @@ export class QueryPanel {
     new QueryPanel(context, bookmarks, historyStorage, config, database, initialQuery, adapter, tableName, schema, key, vscode.ViewColumn.Active, true);
   }
 
+  // ── Message dispatch ──────────────────────────────────────────────────────
+
+  private readonly messageHandlers: { [K in WebviewMessage['type']]?: (msg: Extract<WebviewMessage, { type: K }>) => Promise<void> } = {
+    ready:          (msg) => this.onReady(msg),
+    cancelQuery:    (msg) => this.onCancelQuery(msg),
+    runQuery:       (msg) => this.onRunQuery(msg),
+    updateCell:     (msg) => this.onUpdateCell(msg),
+    clearHistory:   (msg) => this.onClearHistory(msg),
+    getTableMeta:   (msg) => this.onGetTableMeta(msg),
+    deleteRows:     (msg) => this.onDeleteRows(msg),
+    deleteRow:      (msg) => this.onDeleteRow(msg),
+    insertRow:      (msg) => this.onInsertRow(msg),
+    saveBookmark:   (msg) => this.onSaveBookmark(msg),
+    deleteBookmark: (msg) => this.onDeleteBookmark(msg),
+  };
+
   private async handleMessage(msg: WebviewMessage): Promise<void> {
-    if (msg.type === 'ready') {
-      if (this.pendingInit) {
-        let primaryKeys: string[] = [];
-        let columnDefs: ColumnInfo[] = [];
-        if (this.tableName) {
-          try { columnDefs = await this.adapter.getColumns(this.database, this.tableName, this.schema || undefined); } catch { /* non-critical */ }
-          if (isSchemaAdapter(this.adapter)) {
-            try { primaryKeys = await this.adapter.getPrimaryKeys(this.database, this.tableName, this.schema || undefined); } catch { /* non-critical */ }
-          }
+    const handler = this.messageHandlers[msg.type] as ((m: WebviewMessage) => Promise<void>) | undefined;
+    if (handler) await handler(msg);
+  }
+
+  // ── Individual handlers ───────────────────────────────────────────────────
+
+  private async onReady(_msg: Extract<WebviewMessage, { type: 'ready' }>): Promise<void> {
+    if (!this.pendingInit) return;
+
+    let primaryKeys: string[] = [];
+    let columnDefs: ColumnInfo[] = [];
+
+    if (this.tableName) {
+      try {
+        columnDefs = await this.adapter.getColumns(this.database, this.tableName, this.schema || undefined);
+      } catch {
+        // column metadata is non-critical; panel still opens without it
+      }
+      if (isSchemaAdapter(this.adapter)) {
+        try {
+          primaryKeys = await this.adapter.getPrimaryKeys(this.database, this.tableName, this.schema || undefined);
+        } catch {
+          // primary key metadata is non-critical
         }
-        this.send({
-          type: 'init',
-          ...this.pendingInit,
-          bookmarks: this.bookmarks.getAll(this.config.id, this.database),
-          history: this.historyStorage.getAll(this.config.id, this.database),
-          tableName: this.tableName,
-          schema: this.schema,
-          primaryKeys,
-          columnDefs,
-          dbType: this.config.type,
-        });
-        this.pendingInit = null;
-        this.loadSchemaAsync(this.database);
       }
-      return;
     }
 
-    if (msg.type === 'cancelQuery') {
-      this.cancelFn?.();
-      if (this.adapter.cancelQuery) {
-        this.adapter.cancelQuery(this.runningDatabase).catch(() => {});
+    this.send({
+      type: 'init',
+      ...this.pendingInit,
+      bookmarks: this.bookmarks.getAll(this.config.id, this.database),
+      history: this.historyStorage.getAll(this.config.id, this.database),
+      tableName: this.tableName,
+      schema: this.schema,
+      primaryKeys,
+      columnDefs,
+      dbType: this.config.type,
+    });
+    this.pendingInit = null;
+    this.loadSchemaAsync(this.database);
+  }
+
+  private async onCancelQuery(_msg: Extract<WebviewMessage, { type: 'cancelQuery' }>): Promise<void> {
+    this.cancelFn?.();
+    this.adapter.cancelQuery(this.runningDatabase).catch(() => {});
+  }
+
+  private async onRunQuery(msg: Extract<WebviewMessage, { type: 'runQuery' }>): Promise<void> {
+    const historyItems = this.historyStorage.push(this.config.id, this.database, msg.sql);
+    this.broadcastHistory(historyItems);
+    this.send({ type: 'loading' });
+    this.runningDatabase = msg.database;
+    let cancelled = false;
+
+    const page   = msg.page ?? 0;
+    const paginatedSql = injectPagination(msg.sql, page, SERVER_PAGE_SIZE);
+
+    const cancelPromise = new Promise<never>((_, reject) => {
+      this.cancelFn = () => { cancelled = true; reject(new Error('Query cancelled')); };
+    });
+
+    try {
+      const result = await Promise.race([
+        this.adapter.query(paginatedSql, msg.database),
+        cancelPromise,
+      ]);
+      const hasMore = result.rowCount === SERVER_PAGE_SIZE;
+      this.send({ type: 'queryResult', ...result, page, hasMore });
+    } catch (err: unknown) {
+      if (cancelled) {
+        this.send({ type: 'queryCancelled' });
+      } else {
+        this.send({ type: 'queryError', message: err instanceof Error ? err.message : String(err) });
       }
-      return;
-    }
-
-    if (msg.type === 'updateCell' && msg.table && msg.column) {
-      if (!isSchemaAdapter(this.adapter)) {
-        this.send({ type: 'updateCellError', message: 'Cell editing not supported for this database type' });
-        return;
-      }
-      try {
-        const cellSchema = msg.schema ?? this.schema;
-        await this.adapter.updateCell(this.database, msg.table, msg.column, msg.newValue ?? null, msg.pkValues ?? {}, cellSchema || undefined);
-        this.broadcastReload(msg.table, cellSchema);
-      } catch (err: unknown) {
-        this.send({ type: 'updateCellError', message: err instanceof Error ? err.message : String(err) });
-      }
-      return;
-    }
-
-    if (msg.type === 'clearHistory') {
-      this.historyStorage.clear(this.config.id, this.database);
-      this.broadcastHistory([]);
-      return;
-    }
-
-    if (msg.type === 'runQuery' && msg.sql) {
-      const historyItems = this.historyStorage.push(this.config.id, this.database, msg.sql);
-      this.broadcastHistory(historyItems);
-      this.send({ type: 'loading' });
-      this.runningDatabase = msg.database;
-      let cancelled = false;
-
-      const cancelPromise = new Promise<never>((_, reject) => {
-        this.cancelFn = () => { cancelled = true; reject(new Error('Query cancelled')); };
-      });
-
-      try {
-        const result = await Promise.race([
-          this.adapter.query(msg.sql, msg.database),
-          cancelPromise,
-        ]);
-        this.send({ type: 'queryResult', ...result });
-      } catch (err: unknown) {
-        if (cancelled) {
-          this.send({ type: 'queryCancelled' });
-        } else {
-          this.send({ type: 'queryError', message: err instanceof Error ? err.message : String(err) });
-        }
-      } finally {
-        this.cancelFn = null;
-        this.runningDatabase = undefined;
-      }
-      return;
-    }
-
-    if (msg.type === 'getTableMeta' && msg.table) {
-      const table  = msg.table as string;
-      const schema = (msg.schema as string | undefined) || this.schema || undefined;
-      try {
-        const pks  = isSchemaAdapter(this.adapter)
-          ? await this.adapter.getPrimaryKeys(this.database, table, schema)
-          : [];
-        const cols = await this.adapter.getColumns(this.database, table, schema);
-        this.send({ type: 'tableMeta', table, schema: schema ?? '', primaryKeys: pks, columnDefs: cols });
-      } catch { /* non-critical */ }
-      return;
-    }
-
-    if (msg.type === 'deleteRows' && Array.isArray(msg.sqls)) {
-      try {
-        for (const sql of msg.sqls) {
-          await this.adapter.query(sql, this.database);
-        }
-        this.broadcastReload(this.tableName, this.schema);
-        this.send({ type: 'deleteRowsSuccess', count: msg.sqls.length });
-      } catch (err: unknown) {
-        this.send({ type: 'deleteRowError', message: err instanceof Error ? err.message : String(err) });
-      }
-      return;
-    }
-
-    if (msg.type === 'deleteRow' && msg.sql) {
-      try {
-        await this.adapter.query(msg.sql, this.database);
-        this.broadcastReload(this.tableName, this.schema);
-      } catch (err: unknown) {
-        this.send({ type: 'deleteRowError', message: err instanceof Error ? err.message : String(err) });
-      }
-      return;
-    }
-
-    if (msg.type === 'insertRow' && msg.sql) {
-      try {
-        await this.adapter.query(msg.sql, this.database);
-        this.broadcastReload(this.tableName, this.schema);
-        this.send({ type: 'insertRowSuccess' });
-      } catch (err: unknown) {
-        this.send({ type: 'insertRowError', message: err instanceof Error ? err.message : String(err) });
-      }
-      return;
-    }
-
-    if (msg.type === 'saveBookmark' && msg.name && msg.sql) {
-      const items = this.bookmarks.add(this.config.id, this.database, msg.name, msg.sql);
-      this.broadcastBookmarks(items);
-      return;
-    }
-
-    if (msg.type === 'deleteBookmark' && msg.id) {
-      const items = this.bookmarks.delete(this.config.id, this.database, msg.id);
-      this.broadcastBookmarks(items);
-      return;
+    } finally {
+      this.cancelFn = null;
+      this.runningDatabase = undefined;
     }
   }
+
+  private async onUpdateCell(msg: Extract<WebviewMessage, { type: 'updateCell' }>): Promise<void> {
+    if (!isSchemaAdapter(this.adapter)) {
+      this.send({ type: 'updateCellError', message: 'Cell editing not supported for this database type' });
+      return;
+    }
+    try {
+      const cellSchema = msg.schema ?? this.schema;
+      await this.adapter.updateCell(this.database, msg.table, msg.column, msg.newValue, msg.pkValues, cellSchema || undefined);
+      this.broadcastReload(msg.table, cellSchema);
+    } catch (err: unknown) {
+      this.send({ type: 'updateCellError', message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async onClearHistory(_msg: Extract<WebviewMessage, { type: 'clearHistory' }>): Promise<void> {
+    this.historyStorage.clear(this.config.id, this.database);
+    this.broadcastHistory([]);
+  }
+
+  private async onGetTableMeta(msg: Extract<WebviewMessage, { type: 'getTableMeta' }>): Promise<void> {
+    const schema = msg.schema || this.schema || undefined;
+    try {
+      const pks = isSchemaAdapter(this.adapter)
+        ? await this.adapter.getPrimaryKeys(this.database, msg.table, schema)
+        : [];
+      const cols = await this.adapter.getColumns(this.database, msg.table, schema);
+      this.send({ type: 'tableMeta', table: msg.table, schema: schema ?? '', primaryKeys: pks, columnDefs: cols });
+    } catch {
+      // non-critical — webview stays functional without column metadata
+    }
+  }
+
+  private async onDeleteRows(msg: Extract<WebviewMessage, { type: 'deleteRows' }>): Promise<void> {
+    try {
+      for (const sql of msg.sqls) {
+        await this.adapter.query(sql, this.database);
+      }
+      this.broadcastReload(this.tableName, this.schema);
+      this.send({ type: 'deleteRowsSuccess', count: msg.sqls.length });
+    } catch (err: unknown) {
+      this.send({ type: 'deleteRowError', message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async onDeleteRow(msg: Extract<WebviewMessage, { type: 'deleteRow' }>): Promise<void> {
+    try {
+      await this.adapter.query(msg.sql, this.database);
+      this.broadcastReload(this.tableName, this.schema);
+    } catch (err: unknown) {
+      this.send({ type: 'deleteRowError', message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async onInsertRow(msg: Extract<WebviewMessage, { type: 'insertRow' }>): Promise<void> {
+    try {
+      await this.adapter.query(msg.sql, this.database);
+      this.broadcastReload(this.tableName, this.schema);
+      this.send({ type: 'insertRowSuccess' });
+    } catch (err: unknown) {
+      this.send({ type: 'insertRowError', message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async onSaveBookmark(msg: Extract<WebviewMessage, { type: 'saveBookmark' }>): Promise<void> {
+    const items = this.bookmarks.add(this.config.id, this.database, msg.name, msg.sql);
+    this.broadcastBookmarks(items);
+  }
+
+  private async onDeleteBookmark(msg: Extract<WebviewMessage, { type: 'deleteBookmark' }>): Promise<void> {
+    const items = this.bookmarks.delete(this.config.id, this.database, msg.id);
+    this.broadcastBookmarks(items);
+  }
+
+  // ── Schema loading ────────────────────────────────────────────────────────
 
   private async loadSchemaAsync(database: string): Promise<void> {
     try {
@@ -265,38 +277,42 @@ export class QueryPanel {
         }),
       );
       this.send({ type: 'schema', schema });
-    } catch { /* non-critical */ }
+    } catch {
+      // schema autocomplete is non-critical
+    }
   }
+
+  // ── Broadcast helpers ─────────────────────────────────────────────────────
 
   private send(data: Record<string, unknown>): void {
     this.panel.webview.postMessage(data);
   }
 
   private broadcastBookmarks(items: unknown[]): void {
-    for (const panel of QueryPanel.panels.values()) {
-      if (panel.config.id === this.config.id && panel.database === this.database) {
-        panel.send({ type: 'bookmarks', items });
+    for (const p of QueryPanel.panels.values()) {
+      if (p.config.id === this.config.id && p.database === this.database) {
+        p.send({ type: 'bookmarks', items });
       }
     }
   }
 
   private broadcastHistory(items: unknown[]): void {
-    for (const panel of QueryPanel.panels.values()) {
-      if (panel.config.id === this.config.id && panel.database === this.database) {
-        panel.send({ type: 'history', items });
+    for (const p of QueryPanel.panels.values()) {
+      if (p.config.id === this.config.id && p.database === this.database) {
+        p.send({ type: 'history', items });
       }
     }
   }
 
   private broadcastReload(table: string, schema: string): void {
-    for (const panel of QueryPanel.panels.values()) {
+    for (const p of QueryPanel.panels.values()) {
       if (
-        panel.config.id === this.config.id &&
-        panel.database === this.database &&
-        panel.tableName === table &&
-        panel.schema === schema
+        p.config.id === this.config.id &&
+        p.database === this.database &&
+        p.tableName === table &&
+        p.schema === schema
       ) {
-        panel.send({ type: 'reloadData' });
+        p.send({ type: 'reloadData' });
       }
     }
   }
@@ -314,7 +330,14 @@ function randomNonce(): string {
   return crypto.randomBytes(24).toString('base64url');
 }
 
-const SCHEMA_CONCURRENCY = 8;
+function injectPagination(sql: string, page: number, pageSize: number): string {
+  const stripped = sql.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  // Only paginate plain SELECT queries without an existing LIMIT/FETCH clause
+  if (!/^\s*SELECT\b/i.test(stripped)) return sql;
+  if (/\b(LIMIT|FETCH\s+(?:FIRST|NEXT)|ROWNUM\b|TOP\s+\d+)\b/i.test(stripped)) return sql;
+  const offset = page * pageSize;
+  return `${sql.trimEnd()}\nLIMIT ${pageSize} OFFSET ${offset}`;
+}
 
 async function withConcurrency(tasks: (() => Promise<void>)[]): Promise<void> {
   const pool = new Set<Promise<void>>();

@@ -1,5 +1,20 @@
 export type DbType = 'postgres' | 'mysql' | 'sqlite' | 'mssql' | 'oracle' | 'mongodb' | 'redis' | 'graphql';
 
+// ── Webview → Extension messages ─────────────────────────────────────────────
+
+export type WebviewMessage =
+  | { type: 'ready' }
+  | { type: 'runQuery';       sql: string; database: string; page?: number }
+  | { type: 'saveBookmark';   name: string; sql: string }
+  | { type: 'deleteBookmark'; id: string }
+  | { type: 'cancelQuery' }
+  | { type: 'clearHistory' }
+  | { type: 'updateCell';     table: string; database: string; schema: string; column: string; newValue: string | null; pkValues: Record<string, unknown> }
+  | { type: 'deleteRow';      sql: string }
+  | { type: 'deleteRows';     sqls: string[] }
+  | { type: 'insertRow';      sql: string }
+  | { type: 'getTableMeta';   table: string; schema?: string };
+
 export interface ConnectionConfig {
   id: string;
   name: string;

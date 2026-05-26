@@ -2,6 +2,7 @@ import { MongoClient, Db } from 'mongodb';
 import { BaseAdapter } from './BaseAdapter';
 import { IAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo } from '../types';
+import { DEFAULT_PREVIEW_LIMIT } from '../constants';
 
 export class MongoAdapter extends BaseAdapter implements IAdapter {
   private client: MongoClient | null = null;
@@ -26,8 +27,10 @@ export class MongoAdapter extends BaseAdapter implements IAdapter {
 
   isConnected(): boolean { return this.connected; }
 
+  async cancelQuery(_database?: string): Promise<void> { /* MongoDB cursor cancellation not supported via this adapter */ }
+
   buildDefaultQuery(table: string, _schema?: string): string {
-    return `db.${table}.find({}).limit(150)`;
+    return `db.${table}.find({}).limit(${DEFAULT_PREVIEW_LIMIT})`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
@@ -66,7 +69,7 @@ export class MongoAdapter extends BaseAdapter implements IAdapter {
 
     const match = queryStr.trim().match(/^db\.(\w+)\.find\(([\s\S]*?)\)(?:\.limit\((\d+)\))?$/);
     if (!match) {
-      throw new Error('Use MongoDB shell syntax:\n  db.collection.find({ field: value }).limit(150)');
+      throw new Error(`Use MongoDB shell syntax:\n  db.collection.find({ field: value }).limit(${DEFAULT_PREVIEW_LIMIT})`);
     }
 
     const [, collection, filterStr, limitStr] = match;

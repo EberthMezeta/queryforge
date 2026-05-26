@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import { BaseAdapter } from './BaseAdapter';
 import { ISchemaAdapter, IProcedureAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
+import { DEFAULT_PREVIEW_LIMIT } from '../constants';
 
 export class MysqlAdapter extends BaseAdapter implements ISchemaAdapter, IProcedureAdapter {
   private pool: mysql.Pool | null = null;
@@ -37,7 +38,7 @@ export class MysqlAdapter extends BaseAdapter implements ISchemaAdapter, IProced
   isConnected(): boolean { return this.connected; }
 
   buildDefaultQuery(table: string, _schema?: string): string {
-    return `SELECT * FROM \`${table}\` LIMIT 150`;
+    return `SELECT * FROM \`${table}\` LIMIT ${DEFAULT_PREVIEW_LIMIT}`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
@@ -77,7 +78,7 @@ export class MysqlAdapter extends BaseAdapter implements ISchemaAdapter, IProced
     }));
   }
 
-  async cancelQuery(): Promise<void> {
+  async cancelQuery(_database?: string): Promise<void> {
     if (this.activeConn) {
       this.activeConn.destroy();
       this.activeConn = null;

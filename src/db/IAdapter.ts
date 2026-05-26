@@ -10,7 +10,7 @@ export interface IAdapter {
   getColumns(database: string, table: string, schema?: string): Promise<ColumnInfo[]>;
   query(sql: string, database?: string): Promise<QueryResult>;
   buildDefaultQuery(table: string, schema?: string): string;
-  cancelQuery?(database?: string): Promise<void>;
+  cancelQuery(database?: string): Promise<void>;
 }
 
 // Schema-aware: DDL, primary keys, cell editing

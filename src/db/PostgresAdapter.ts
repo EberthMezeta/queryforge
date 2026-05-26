@@ -2,6 +2,7 @@ import { Client } from 'pg';
 import { BaseAdapter } from './BaseAdapter';
 import { ISchemaAdapter, IProcedureAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
+import { DEFAULT_PREVIEW_LIMIT, MAX_PG_SESSION_CLIENTS } from '../constants';
 
 export class PostgresAdapter extends BaseAdapter implements ISchemaAdapter, IProcedureAdapter {
   private mainClient: Client | null = null;
@@ -41,8 +42,8 @@ export class PostgresAdapter extends BaseAdapter implements ISchemaAdapter, IPro
 
   buildDefaultQuery(table: string, schema?: string): string {
     return schema
-      ? `SELECT * FROM "${schema}"."${table}" LIMIT 150`
-      : `SELECT * FROM "${table}" LIMIT 150`;
+      ? `SELECT * FROM "${schema}"."${table}" LIMIT ${DEFAULT_PREVIEW_LIMIT}`
+      : `SELECT * FROM "${table}" LIMIT ${DEFAULT_PREVIEW_LIMIT}`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
@@ -185,6 +186,11 @@ export class PostgresAdapter extends BaseAdapter implements ISchemaAdapter, IPro
   private async getSessionClient(database: string): Promise<Client> {
     let client = this.sessionClients.get(database);
     if (!client) {
+      if (this.sessionClients.size >= MAX_PG_SESSION_CLIENTS) {
+        const oldest = this.sessionClients.keys().next().value as string;
+        await this.sessionClients.get(oldest)!.end().catch(() => {});
+        this.sessionClients.delete(oldest);
+      }
       client = new Client(this.clientConfig(database));
       await client.connect();
       this.sessionClients.set(database, client);

@@ -1,7 +1,5 @@
-import * as vscode from 'vscode';
-
-const MAX_BOOKMARKS = 100;
-const MAX_SQL_LENGTH = 10_000;
+import { IStorageContext } from './IStorageContext';
+import { MAX_BOOKMARKS, MAX_SQL_LENGTH } from '../constants';
 
 export interface Bookmark {
   id: string;
@@ -11,7 +9,7 @@ export interface Bookmark {
 }
 
 export class BookmarkStorage {
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(private readonly context: IStorageContext) {}
 
   private key(connectionId: string, database: string): string {
     return `dbConnection.bookmarks.${connectionId}.${database}`;

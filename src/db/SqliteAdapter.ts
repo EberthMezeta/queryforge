@@ -4,6 +4,7 @@ import * as path from 'path';
 import { BaseAdapter } from './BaseAdapter';
 import { ISchemaAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo } from '../types';
+import { DEFAULT_PREVIEW_LIMIT } from '../constants';
 
 export class SqliteAdapter extends BaseAdapter implements ISchemaAdapter {
   private db: Database | null = null;
@@ -30,8 +31,10 @@ export class SqliteAdapter extends BaseAdapter implements ISchemaAdapter {
 
   isConnected(): boolean { return this.connected; }
 
+  async cancelQuery(_database?: string): Promise<void> { /* SQLite is synchronous; no in-flight query to cancel */ }
+
   buildDefaultQuery(table: string, _schema?: string): string {
-    return `SELECT * FROM "${table}" LIMIT 150`;
+    return `SELECT * FROM "${table}" LIMIT ${DEFAULT_PREVIEW_LIMIT}`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
@@ -90,10 +93,11 @@ export class SqliteAdapter extends BaseAdapter implements ISchemaAdapter {
 
   async getTableDDL(_database: string, table: string): Promise<string> {
     this.assertConnected();
-    const result = this.db!.exec(
-      `SELECT sql FROM sqlite_master WHERE name = '${table.replace(/'/g, "''")}' LIMIT 1`,
-    );
-    return (result[0]?.values[0]?.[0] as string) ?? '';
+    const stmt = this.db!.prepare('SELECT sql FROM sqlite_master WHERE name = ? LIMIT 1');
+    stmt.bind([table]);
+    const row = stmt.step() ? (stmt.getAsObject() as { sql?: string }) : null;
+    stmt.free();
+    return row?.sql ?? '';
   }
 
   async getPrimaryKeys(_database: string, table: string): Promise<string[]> {

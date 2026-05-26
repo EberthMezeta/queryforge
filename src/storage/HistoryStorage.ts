@@ -1,4 +1,5 @@
-import * as vscode from 'vscode';
+import { IStorageContext } from './IStorageContext';
+import { MAX_HISTORY } from '../constants';
 
 export interface HistoryEntry {
   id: string;
@@ -6,10 +7,8 @@ export interface HistoryEntry {
   executedAt: number;
 }
 
-const MAX_HISTORY = 50;
-
 export class HistoryStorage {
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(private readonly context: IStorageContext) {}
 
   private key(connectionId: string, database: string): string {
     return `dbConnection.history.${connectionId}.${database}`;

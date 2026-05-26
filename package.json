@@ -166,7 +166,9 @@
     "vscode:prepublish": "npm run build",
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.media.json --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.media.json --noEmit",
+    "test": "vitest run",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.20.2",
@@ -183,7 +185,8 @@
     "esbuild": "^0.28.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.7"
   },
   "dependencies": {
     "mongodb": "^7.2.0",
