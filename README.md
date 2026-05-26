@@ -27,6 +27,7 @@ A Visual Studio Code extension that provides a unified interface for browsing an
 - **Test connection** before saving to verify credentials are correct
 - **Auto-reconnect** on startup — all saved connections are restored automatically when VS Code opens
 - **Disconnect / reconnect** on demand from the tree view
+- **Edit connections** — click the ✎ icon on any connection to update host, credentials, or name without deleting and recreating it
 - **Delete connections** with a confirmation prompt to prevent accidents
 - Connection state (connected / disconnected) is reflected in the tree view icon
 
@@ -68,6 +69,7 @@ Connection
 - **Keyword uppercasing** — SQL keywords are suggested in uppercase
 - **Run query** with `Ctrl+Enter` (or `Cmd+Enter` on macOS) or the Run button
 - **Cancel** long-running queries mid-execution without disconnecting
+- **Safety confirmation** — `DELETE`, `TRUNCATE`, `DROP`, and `UPDATE` statements require confirmation before executing
 - **LIMIT control** — set the row limit directly from the toolbar before running
 - Opening a table pre-fills the editor with a default `SELECT` query and runs it immediately
 - Opening a stored procedure or function loads its full definition into the editor

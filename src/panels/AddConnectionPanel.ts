@@ -6,31 +6,45 @@ import { createAdapter } from '../db/index';
 import { ConnectionConfig } from '../types';
 
 export class AddConnectionPanel {
-  private static instance: AddConnectionPanel | undefined;
+  private static instances = new Map<string, AddConnectionPanel>();
   private readonly panel: vscode.WebviewPanel;
+  private pendingConfig: ConnectionConfig | undefined;
 
   private constructor(
     private readonly storage: ConnectionStorage,
     private readonly provider: ConnectionsProvider,
+    private readonly existingConfig?: ConnectionConfig,
   ) {
+    const title = existingConfig ? `Edit: ${existingConfig.name}` : 'Add Connection';
     this.panel = vscode.window.createWebviewPanel(
       'addConnection',
-      'Add Connection',
+      title,
       vscode.ViewColumn.One,
       { enableScripts: true, retainContextWhenHidden: true },
     );
 
+    this.pendingConfig = existingConfig;
     this.panel.webview.html = buildHtml(randomNonce());
     this.panel.webview.onDidReceiveMessage(this.handleMessage.bind(this));
-    this.panel.onDidDispose(() => { AddConnectionPanel.instance = undefined; });
+    this.panel.onDidDispose(() => {
+      const key = existingConfig ? existingConfig.id : 'new';
+      AddConnectionPanel.instances.delete(key);
+    });
   }
 
-  static show(storage: ConnectionStorage, provider: ConnectionsProvider): void {
-    if (AddConnectionPanel.instance) {
-      AddConnectionPanel.instance.panel.reveal();
+  static show(
+    storage: ConnectionStorage,
+    provider: ConnectionsProvider,
+    existingConfig?: ConnectionConfig,
+  ): void {
+    const key = existingConfig ? existingConfig.id : 'new';
+    const existing = AddConnectionPanel.instances.get(key);
+    if (existing) {
+      existing.panel.reveal();
       return;
     }
-    AddConnectionPanel.instance = new AddConnectionPanel(storage, provider);
+    const panel = new AddConnectionPanel(storage, provider, existingConfig);
+    AddConnectionPanel.instances.set(key, panel);
   }
 
   private send(data: Record<string, unknown>): void {
@@ -39,6 +53,14 @@ export class AddConnectionPanel {
 
   private async handleMessage(msg: Record<string, unknown>): Promise<void> {
     switch (msg.type) {
+      case 'ready': {
+        if (this.pendingConfig) {
+          this.send({ type: 'loadConfig', config: this.pendingConfig });
+          this.pendingConfig = undefined;
+        }
+        break;
+      }
+
       case 'browse': {
         const uris = await vscode.window.showOpenDialog({
           canSelectFiles: true,
@@ -70,15 +92,26 @@ export class AddConnectionPanel {
       }
 
       case 'saveConnection': {
-        const raw = msg.config as Omit<ConnectionConfig, 'id'>;
-        const config: ConnectionConfig = { id: Date.now().toString(), ...raw };
+        const raw = msg.config as ConnectionConfig;
+        const isEdit = Boolean(raw.id);
+        const config: ConnectionConfig = { ...raw, id: raw.id || Date.now().toString() };
         try {
-          const adapter = createAdapter(config);
-          await adapter.connect();
+          if (!isEdit) {
+            // New connection: verify it connects before saving
+            const adapter = createAdapter(config);
+            await adapter.connect();
+            await adapter.disconnect();
+          }
           await this.storage.saveConnection(config);
+          if (isEdit) {
+            // Disconnect old adapter so the tree reconnects with updated config
+            await this.provider.disconnect(config.id);
+          }
           this.provider.refresh();
           this.panel.dispose();
-          vscode.window.showInformationMessage(`✓ Connection "${config.name}" saved.`);
+          vscode.window.showInformationMessage(
+            `✓ Connection "${config.name}" ${isEdit ? 'updated' : 'saved'}.`,
+          );
         } catch (err: unknown) {
           this.send({
             type: 'saveResult',
@@ -190,7 +223,7 @@ function buildHtml(nonce: string): string {
 </head>
 <body>
 <div class="container">
-  <h2>Add Connection</h2>
+  <h2 id="panel-title">Add Connection</h2>
 
   <div class="db-types">
     <div class="db-card selected" data-type="mysql">
@@ -301,7 +334,7 @@ function buildHtml(nonce: string): string {
       <div id="status" hidden></div>
       <div class="action-btns">
         <button type="button" class="btn btn-secondary" id="test-btn">Test Connection</button>
-        <button type="submit" class="btn btn-primary">Save Connection</button>
+        <button type="submit" class="btn btn-primary" id="save-btn">Save Connection</button>
       </div>
     </div>
   </form>
@@ -310,7 +343,7 @@ function buildHtml(nonce: string): string {
 <script nonce="${nonce}">
   var vscode = acquireVsCodeApi();
   var dbType = 'mysql';
-  var connStrRaw = '';
+  var editId = null;
   var PORTS = {mysql:3306,postgres:5432,mssql:1433,oracle:1521,mongodb:27017,redis:6379};
 
   document.querySelectorAll('.db-card').forEach(function(card) {
@@ -344,6 +377,35 @@ function buildHtml(nonce: string): string {
     document.getElementById('trust-cert-group').hidden = !isMssql;
   }
 
+  function loadConfig(cfg) {
+    editId = cfg.id || null;
+    document.getElementById('panel-title').textContent = editId ? 'Edit Connection' : 'Add Connection';
+    document.getElementById('save-btn').textContent    = editId ? 'Save Changes'    : 'Save Connection';
+
+    // Select the correct DB type card
+    var card = document.querySelector('.db-card[data-type="' + cfg.type + '"]');
+    if (card) {
+      document.querySelectorAll('.db-card').forEach(function(c){c.classList.remove('selected');});
+      card.classList.add('selected');
+      dbType = cfg.type;
+      switchForm();
+    }
+
+    // Populate fields
+    if (cfg.name)     document.getElementById('f-name').value    = cfg.name;
+    if (cfg.host)     document.getElementById('f-host').value    = cfg.host;
+    if (cfg.port)     document.getElementById('f-port').value    = cfg.port;
+    if (cfg.user)     document.getElementById('f-user').value    = cfg.user;
+    if (cfg.password) document.getElementById('f-pass').value    = cfg.password;
+    if (cfg.database) document.getElementById('f-db').value      = cfg.database;
+    if (cfg.serviceName) document.getElementById('f-service').value = cfg.serviceName;
+    if (cfg.filename) document.getElementById('f-file').value    = cfg.filename;
+    if (cfg.url)      document.getElementById('f-url').value     = cfg.url;
+    if (cfg.headers)  document.getElementById('f-headers').value = JSON.stringify(cfg.headers, null, 2);
+    if (cfg.encrypt)           document.getElementById('f-encrypt').checked   = true;
+    if (cfg.trustServerCertificate) document.getElementById('f-trust-cert').checked = true;
+  }
+
   document.getElementById('browse-btn').addEventListener('click', function() {
     vscode.postMessage({type:'browse'});
   });
@@ -351,38 +413,39 @@ function buildHtml(nonce: string): string {
   function getConfig() {
     var name = (document.getElementById('f-name').value||'').trim();
     if (!name) { showStatus('Connection name is required', false); return null; }
+    var cfg;
     if (dbType==='sqlite') {
       var fname = (document.getElementById('f-file').value||'').trim();
       if (!fname) { showStatus('File path is required', false); return null; }
-      return {name:name, type:'sqlite', filename:fname};
-    }
-    if (dbType==='graphql') {
+      cfg = {name:name, type:'sqlite', filename:fname};
+    } else if (dbType==='graphql') {
       var gurl = (document.getElementById('f-url').value||'').trim();
       if (!gurl) { showStatus('Endpoint URL is required', false); return null; }
       var hstr = (document.getElementById('f-headers').value||'').trim();
       var hdrs = {};
       if (hstr) { try { hdrs=JSON.parse(hstr); } catch(e) { showStatus('Headers must be valid JSON', false); return null; } }
-      return {name:name, type:'graphql', url:gurl, headers:hdrs};
+      cfg = {name:name, type:'graphql', url:gurl, headers:hdrs};
+    } else {
+      var host = (document.getElementById('f-host').value||'').trim()||'127.0.0.1';
+      var port = parseInt(document.getElementById('f-port').value,10)||PORTS[dbType]||3306;
+      var user = document.getElementById('f-user').value||'';
+      var pass = document.getElementById('f-pass').value||'';
+      if (dbType==='oracle') {
+        var svc = (document.getElementById('f-service').value||'').trim()||'XEPDB1';
+        cfg = {name:name, type:'oracle', host:host, port:port, user:user, password:pass, serviceName:svc};
+      } else if (dbType==='redis') {
+        cfg = {name:name, type:'redis', host:host, port:port, password:pass};
+      } else if (dbType==='mongodb') {
+        cfg = {name:name, type:'mongodb', host:host, port:port, user:user, password:pass};
+      } else {
+        var db = (document.getElementById('f-db').value||'').trim();
+        var encrypt   = document.getElementById('f-encrypt')   ? document.getElementById('f-encrypt').checked   : false;
+        var trustCert = document.getElementById('f-trust-cert') ? document.getElementById('f-trust-cert').checked : false;
+        cfg = {name:name, type:dbType, host:host, port:port, user:user, password:pass, database:db||undefined};
+        if (dbType==='mssql') { cfg.encrypt=encrypt; cfg.trustServerCertificate=trustCert; }
+      }
     }
-    var host = (document.getElementById('f-host').value||'').trim()||'127.0.0.1';
-    var port = parseInt(document.getElementById('f-port').value,10)||PORTS[dbType]||3306;
-    var user = document.getElementById('f-user').value||'';
-    var pass = document.getElementById('f-pass').value||'';
-    if (dbType==='oracle') {
-      var svc = (document.getElementById('f-service').value||'').trim()||'XEPDB1';
-      return {name:name, type:'oracle', host:host, port:port, user:user, password:pass, serviceName:svc};
-    }
-    if (dbType==='redis') {
-      return {name:name, type:'redis', host:host, port:port, password:pass, url:connStrRaw||undefined};
-    }
-    if (dbType==='mongodb') {
-      return {name:name, type:'mongodb', host:host, port:port, user:user, password:pass, url:connStrRaw||undefined};
-    }
-    var db = (document.getElementById('f-db').value||'').trim();
-    var encrypt   = document.getElementById('f-encrypt')   ? document.getElementById('f-encrypt').checked   : false;
-    var trustCert = document.getElementById('f-trust-cert') ? document.getElementById('f-trust-cert').checked : false;
-    var cfg = {name:name, type:dbType, host:host, port:port, user:user, password:pass, database:db||undefined};
-    if (dbType==='mssql') { cfg.encrypt=encrypt; cfg.trustServerCertificate=trustCert; }
+    if (editId) cfg.id = editId;
     return cfg;
   }
 
@@ -397,13 +460,13 @@ function buildHtml(nonce: string): string {
     e.preventDefault();
     var cfg = getConfig();
     if (!cfg) return;
-    setLoading(true, 'Connecting and saving…');
+    setLoading(true, editId ? 'Saving changes…' : 'Connecting and saving…');
     vscode.postMessage({type:'saveConnection', config:cfg});
   });
 
   function setLoading(on, msg) {
     document.getElementById('test-btn').disabled = on;
-    document.querySelector('[type=submit]').disabled = on;
+    document.getElementById('save-btn').disabled = on;
     if (msg) showStatus(msg, null);
   }
 
@@ -417,10 +480,14 @@ function buildHtml(nonce: string): string {
   window.addEventListener('message', function(e) {
     var msg = e.data;
     setLoading(false, null);
-    if (msg.type==='testResult') showStatus(msg.message, msg.success);
-    if (msg.type==='saveResult') showStatus(msg.message, false);
-    if (msg.type==='filePicked') document.getElementById('f-file').value = msg.path;
+    if (msg.type==='loadConfig')  loadConfig(msg.config);
+    if (msg.type==='testResult')  showStatus(msg.message, msg.success);
+    if (msg.type==='saveResult')  showStatus(msg.message, false);
+    if (msg.type==='filePicked')  document.getElementById('f-file').value = msg.path;
   });
+
+  // Notify host that the webview is ready to receive config
+  vscode.postMessage({type:'ready'});
 </script>
 </body>
 </html>`;

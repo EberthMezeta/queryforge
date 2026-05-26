@@ -247,9 +247,57 @@ function init() {
 
 // ── Query execution ───────────────────────────────────────────────────────────
 
-function runQuery() {
+function isDestructiveDML(sqlText: string): boolean {
+  const clean = sqlText.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+  return /^\s*(DELETE|TRUNCATE|DROP|UPDATE)\b/i.test(clean);
+}
+
+function confirmDML(sqlText: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const clean = sqlText.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+    const kw = (clean.match(/^\s*(\w+)/)?.[1] ?? '').toUpperCase();
+    const TITLES: Record<string, string> = {
+      DELETE:   'This will permanently delete rows',
+      TRUNCATE: 'This will erase ALL rows from the table',
+      DROP:     'This will permanently destroy a database object',
+      UPDATE:   'This will modify rows in the table',
+    };
+    document.getElementById('dml-confirm-title')!.textContent = TITLES[kw] ?? 'Destructive operation';
+    document.getElementById('dml-confirm-sql')!.textContent =
+      sqlText.length > 300 ? sqlText.slice(0, 300) + '…' : sqlText;
+
+    const overlay   = document.getElementById('dml-confirm-overlay')!;
+    const execBtn   = document.getElementById('dml-btn-execute') as HTMLButtonElement;
+    const cancelBtn = document.getElementById('dml-btn-cancel') as HTMLButtonElement;
+    overlay.hidden = false;
+
+    function done(result: boolean) {
+      overlay.hidden = true;
+      execBtn.removeEventListener('click', onExec);
+      cancelBtn.removeEventListener('click', onCancel);
+      document.removeEventListener('keydown', onKey);
+      resolve(result);
+    }
+    function onExec()   { done(true);  }
+    function onCancel() { done(false); }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') done(false);
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); done(true); }
+    }
+    execBtn.addEventListener('click', onExec);
+    cancelBtn.addEventListener('click', onCancel);
+    document.addEventListener('keydown', onKey);
+    cancelBtn.focus();
+  });
+}
+
+async function runQuery() {
   const sqlText = editor.state.doc.toString().trim();
   if (!sqlText) return;
+  if (isDestructiveDML(sqlText)) {
+    const ok = await confirmDML(sqlText);
+    if (!ok) return;
+  }
   runningSQL = sqlText;
   baseQuery = sqlText.replace(/\s+ORDER\s+BY\s+[\s\S]*$/i, '').trim() || sqlText;
   historyIndex = -1;
@@ -758,8 +806,13 @@ function updateCheckAll() {
   checkAll.indeterminate = sel > 0 && sel < pageRows.length;
 }
 
-function deleteSelectedRows() {
+async function deleteSelectedRows() {
   if (!selectedPks.size || !currentTable || !primaryKeys.length) return;
+  const count = selectedPks.size;
+  const summary = `DELETE ${count} row${count === 1 ? '' : 's'} FROM "${currentTable}"`;
+  const ok = await confirmDML(summary);
+  if (!ok) return;
+
   const q = quoteIdentifier;
   const tableRef = currentSchema ? `${q(currentSchema)}.${q(currentTable)}` : q(currentTable);
   const sqls = Array.from(selectedPks).map((rawPk) => {

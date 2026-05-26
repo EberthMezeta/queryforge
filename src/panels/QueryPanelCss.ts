@@ -249,4 +249,29 @@ kbd{
   opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;z-index:999;
 }
 #toast.toast-visible{opacity:1;transform:translateX(-50%) translateY(0)}
+#dml-confirm-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:300;
+  display:flex;align-items:center;justify-content:center;
+}
+#dml-confirm-modal{
+  background:var(--vscode-editor-background);
+  border:1px solid var(--vscode-inputValidation-errorBorder);
+  border-radius:6px;width:420px;max-width:92vw;
+  padding:22px 24px;display:flex;flex-direction:column;gap:14px;
+}
+.dml-warning-icon{font-size:26px;text-align:center}
+#dml-confirm-title{
+  font-size:13px;font-weight:600;text-align:center;
+  color:var(--vscode-errorForeground);
+}
+#dml-confirm-sql{
+  background:var(--vscode-input-background);
+  border:1px solid var(--vscode-panel-border);
+  border-radius:4px;padding:8px 10px;font-size:11px;
+  font-family:var(--vscode-editor-font-family,monospace);
+  white-space:pre-wrap;word-break:break-all;
+  max-height:120px;overflow-y:auto;
+  color:var(--vscode-editor-foreground);
+}
+.dml-confirm-btns{display:flex;justify-content:flex-end;gap:8px}
 `;

@@ -108,6 +108,18 @@ export function buildWebviewHtml(nonce: string, webviewUri: string): string {
     <button id="cancel-btn" class="btn btn-danger">✕ Cancel</button>
   </div>
 
+  <div id="dml-confirm-overlay" hidden>
+    <div id="dml-confirm-modal">
+      <div class="dml-warning-icon">⚠️</div>
+      <p id="dml-confirm-title"></p>
+      <pre id="dml-confirm-sql"></pre>
+      <div class="dml-confirm-btns">
+        <button id="dml-btn-cancel" class="btn btn-sm">Cancel</button>
+        <button id="dml-btn-execute" class="btn btn-danger btn-sm">Execute anyway</button>
+      </div>
+    </div>
+  </div>
+
   <script nonce="${nonce}" src="${webviewUri}"></script>
 </body>
 </html>`;

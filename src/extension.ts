@@ -93,6 +93,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
 
+    vscode.commands.registerCommand('dbConnection.editConnection', (item: ConnectionItem) => {
+      AddConnectionPanel.show(storage, provider, item.config);
+    }),
+
     vscode.commands.registerCommand('dbConnection.openProcedure', async (item: ProcedureItem) => {
       if (!isProcedureAdapter(item.adapter)) return;
       try {
