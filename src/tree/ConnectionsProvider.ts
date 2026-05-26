@@ -81,8 +81,13 @@ export class ConnectionsProvider implements vscode.TreeDataProvider<AnyItem> {
 
   private async getConnectionChildren(element: ConnectionItem): Promise<AnyItem[]> {
     try {
+      const wasConnected = this.adapterCache.isConnected(element.config.id);
       const adapter = await this.adapterCache.getOrConnect(element.config);
-      this._onDidChangeTreeData.fire();
+      // Defer the icon update (disconnected→connected) until after getChildren returns.
+      // Firing synchronously here re-enters getChildren and causes an infinite loading loop.
+      if (!wasConnected) {
+        setTimeout(() => this._onDidChangeTreeData.fire(), 0);
+      }
       const databases = await adapter.getDatabases();
       return databases.map((db) => new DatabaseItem(db.name, element.config, adapter));
     } catch (err: unknown) {
