@@ -166,7 +166,7 @@
     "vscode:prepublish": "npm run build",
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.media.json --noEmit"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.20.2",
@@ -191,6 +191,7 @@
     "mysql2": "^3.9.2",
     "oracledb": "^6.10.0",
     "pg": "^8.11.3",
+    "preact": "^10.29.2",
     "redis": "^5.12.1",
     "sql.js": "^1.12.0"
   }

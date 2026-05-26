@@ -18,7 +18,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand('dbConnection.addConnection', () =>
-      AddConnectionPanel.show(storage, provider),
+      AddConnectionPanel.show(context, storage, provider),
     ),
 
     vscode.commands.registerCommand('dbConnection.refreshConnections', () => provider.refresh()),
@@ -94,7 +94,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
 
     vscode.commands.registerCommand('dbConnection.editConnection', (item: ConnectionItem) => {
-      AddConnectionPanel.show(storage, provider, item.config);
+      AddConnectionPanel.show(context, storage, provider, item.config);
     }),
 
     vscode.commands.registerCommand('dbConnection.openProcedure', async (item: ProcedureItem) => {
