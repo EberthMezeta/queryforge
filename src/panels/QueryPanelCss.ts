@@ -184,6 +184,63 @@ kbd{
   padding:0 8px;font-size:13px;font-weight:600;
 }
 .cell-save-btn:hover{background:var(--vscode-button-hoverBackground)}
+#ctx-menu{
+  position:fixed;z-index:200;
+  background:var(--vscode-menu-background,var(--vscode-editorWidget-background));
+  border:1px solid var(--vscode-menu-border,var(--vscode-panel-border));
+  border-radius:4px;padding:4px 0;min-width:170px;
+  box-shadow:0 4px 12px rgba(0,0,0,.3);
+}
+.ctx-item{
+  padding:6px 14px;cursor:pointer;font-size:12px;
+  color:var(--vscode-menu-foreground,var(--vscode-editor-foreground));
+  display:flex;align-items:center;gap:8px;
+}
+.ctx-item:hover{background:var(--vscode-menu-selectionBackground,var(--vscode-list-hoverBackground))}
+.ctx-danger{color:var(--vscode-errorForeground)}
+.ctx-danger:hover{background:var(--vscode-inputValidation-errorBackground)}
+.col-check{width:32px;padding:0 8px!important;text-align:center;flex-shrink:0}
+.col-check input[type=checkbox]{cursor:pointer;accent-color:var(--vscode-focusBorder)}
+.btn-insert{background:var(--vscode-button-background);color:var(--vscode-button-foreground);flex-shrink:0}
+.btn-insert:hover:not(:disabled){background:var(--vscode-button-hoverBackground)}
+.btn-delete{background:var(--vscode-inputValidation-errorBackground);color:var(--vscode-errorForeground);border:1px solid var(--vscode-inputValidation-errorBorder);flex-shrink:0}
+.btn-delete:hover:not(:disabled){opacity:.85}
+.btn-delete:disabled{opacity:.35;cursor:not-allowed}
+.btn-icon{background:none;border:none;cursor:pointer;color:var(--vscode-descriptionForeground);font-size:14px;line-height:1;padding:2px 4px;opacity:.7}
+.btn-icon:hover{opacity:1}
+#insert-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;
+  display:flex;align-items:center;justify-content:center;
+}
+#insert-modal{
+  background:var(--vscode-editor-background);
+  border:1px solid var(--vscode-panel-border);
+  border-radius:6px;width:440px;max-width:95vw;
+  display:flex;flex-direction:column;max-height:80vh;
+}
+#insert-modal-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 16px;border-bottom:1px solid var(--vscode-panel-border);
+  font-size:13px;font-weight:600;flex-shrink:0;
+}
+#insert-modal-body{padding:14px 16px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.insert-field{display:flex;flex-direction:column;gap:4px}
+.insert-label{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--vscode-descriptionForeground)}
+.insert-type{font-size:10px;opacity:.6;text-transform:none;letter-spacing:0}
+.insert-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.insert-pk{background:var(--vscode-textLink-foreground);color:#fff}
+.insert-req{background:var(--vscode-inputValidation-warningBackground);color:var(--vscode-editor-foreground)}
+.insert-input{
+  background:var(--vscode-input-background);color:var(--vscode-input-foreground);
+  border:1px solid var(--vscode-input-border,rgba(255,255,255,.1));
+  border-radius:4px;padding:5px 9px;font-size:12px;outline:none;font-family:inherit;
+}
+.insert-input:focus{border-color:var(--vscode-focusBorder)}
+.insert-error{margin:0 16px;padding:8px 10px;border-radius:4px;font-size:11px;color:var(--vscode-errorForeground);background:var(--vscode-inputValidation-errorBackground);border:1px solid var(--vscode-inputValidation-errorBorder)}
+#insert-modal-footer{
+  display:flex;justify-content:flex-end;gap:8px;
+  padding:12px 16px;border-top:1px solid var(--vscode-panel-border);flex-shrink:0;
+}
 #toast{
   position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(12px);
   background:var(--vscode-editorWidget-background);color:var(--vscode-editor-foreground);

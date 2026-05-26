@@ -1,13 +1,14 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import { IAdapter, isSchemaAdapter } from '../db/IAdapter';
-import { ConnectionConfig } from '../types';
+import { ConnectionConfig, ColumnInfo } from '../types';
 import { BookmarkStorage } from '../storage/BookmarkStorage';
 import { HistoryStorage } from '../storage/HistoryStorage';
 import { buildWebviewHtml } from './QueryPanelHtml';
 
 interface WebviewMessage {
-  type: 'ready' | 'runQuery' | 'saveBookmark' | 'deleteBookmark' | 'cancelQuery' | 'clearHistory' | 'updateCell';
+  type: 'ready' | 'runQuery' | 'saveBookmark' | 'deleteBookmark' | 'cancelQuery' | 'clearHistory' | 'updateCell' | 'insertRow' | 'deleteRow' | 'deleteRows' | 'getTableMeta';
+  sqls?: string[];
   sql?: string;
   database?: string;
   name?: string;
@@ -106,8 +107,12 @@ export class QueryPanel {
     if (msg.type === 'ready') {
       if (this.pendingInit) {
         let primaryKeys: string[] = [];
-        if (this.tableName && isSchemaAdapter(this.adapter)) {
-          try { primaryKeys = await this.adapter.getPrimaryKeys(this.database, this.tableName, this.schema || undefined); } catch { /* non-critical */ }
+        let columnDefs: ColumnInfo[] = [];
+        if (this.tableName) {
+          try { columnDefs = await this.adapter.getColumns(this.database, this.tableName, this.schema || undefined); } catch { /* non-critical */ }
+          if (isSchemaAdapter(this.adapter)) {
+            try { primaryKeys = await this.adapter.getPrimaryKeys(this.database, this.tableName, this.schema || undefined); } catch { /* non-critical */ }
+          }
         }
         this.send({
           type: 'init',
@@ -117,6 +122,8 @@ export class QueryPanel {
           tableName: this.tableName,
           schema: this.schema,
           primaryKeys,
+          columnDefs,
+          dbType: this.config.type,
         });
         this.pendingInit = null;
         this.loadSchemaAsync(this.database);
@@ -179,6 +186,53 @@ export class QueryPanel {
       } finally {
         this.cancelFn = null;
         this.runningDatabase = undefined;
+      }
+      return;
+    }
+
+    if (msg.type === 'getTableMeta' && msg.table) {
+      const table  = msg.table as string;
+      const schema = (msg.schema as string | undefined) || this.schema || undefined;
+      try {
+        const pks  = isSchemaAdapter(this.adapter)
+          ? await this.adapter.getPrimaryKeys(this.database, table, schema)
+          : [];
+        const cols = await this.adapter.getColumns(this.database, table, schema);
+        this.send({ type: 'tableMeta', table, schema: schema ?? '', primaryKeys: pks, columnDefs: cols });
+      } catch { /* non-critical */ }
+      return;
+    }
+
+    if (msg.type === 'deleteRows' && Array.isArray(msg.sqls)) {
+      try {
+        for (const sql of msg.sqls) {
+          await this.adapter.query(sql, this.database);
+        }
+        this.broadcastReload(this.tableName, this.schema);
+        this.send({ type: 'deleteRowsSuccess', count: msg.sqls.length });
+      } catch (err: unknown) {
+        this.send({ type: 'deleteRowError', message: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    if (msg.type === 'deleteRow' && msg.sql) {
+      try {
+        await this.adapter.query(msg.sql, this.database);
+        this.broadcastReload(this.tableName, this.schema);
+      } catch (err: unknown) {
+        this.send({ type: 'deleteRowError', message: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    if (msg.type === 'insertRow' && msg.sql) {
+      try {
+        await this.adapter.query(msg.sql, this.database);
+        this.broadcastReload(this.tableName, this.schema);
+        this.send({ type: 'insertRowSuccess' });
+      } catch (err: unknown) {
+        this.send({ type: 'insertRowError', message: err instanceof Error ? err.message : String(err) });
       }
       return;
     }

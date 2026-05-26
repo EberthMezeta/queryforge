@@ -77,6 +77,9 @@ export function buildWebviewHtml(nonce: string, webviewUri: string): string {
         <span id="page-info"></span>
         <button id="page-next" class="btn btn-sm page-btn">›</button>
       </div>
+
+      <button id="btn-delete-rows" class="btn btn-sm btn-delete" title="Delete selected rows" hidden disabled>🗑 Delete</button>
+      <button id="btn-insert-row"  class="btn btn-sm btn-insert" title="Insert new row"        hidden>＋ Add Row</button>
       <div class="export-btns">
         <button id="export-csv"   class="btn btn-sm" title="Export as CSV">🗂 CSV</button>
         <button id="export-json"  class="btn btn-sm" title="Export as JSON">📋 JSON</button>

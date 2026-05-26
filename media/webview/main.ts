@@ -39,6 +39,10 @@ let filterText = '';
 let sortCol: string | null = null;
 let sortDir: 'asc' | 'desc' = 'asc';
 let baseQuery = '';
+let runningSQL = '';
+let columnDefs: Array<{ name: string; type: string; nullable: boolean }> = [];
+let dbType = '';
+const selectedPks = new Set<string>();
 let editingCell: { td: HTMLElement; originalContent: string } | null = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -89,6 +93,28 @@ function init() {
   });
 
   document.getElementById('btn-format-query')!.addEventListener('click', formatQuery);
+  document.getElementById('btn-insert-row')!.addEventListener('click', showInsertModal);
+  document.getElementById('btn-delete-rows')!.addEventListener('click', deleteSelectedRows);
+
+  document.getElementById('t-head')!.addEventListener('change', (e) => {
+    const cb = e.target as HTMLInputElement;
+    if (cb.id !== 'check-all') return;
+    const pageRows = filteredRows().slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+    pageRows.forEach((row) => {
+      const rawPk = JSON.stringify(Object.fromEntries(primaryKeys.map((k) => [k, row[k]])));
+      cb.checked ? selectedPks.add(rawPk) : selectedPks.delete(rawPk);
+    });
+    renderPage();
+    updateDeleteBtn();
+  });
+
+  document.getElementById('t-body')!.addEventListener('change', (e) => {
+    const cb = e.target as HTMLInputElement;
+    if (!cb.classList.contains('row-check')) return;
+    cb.checked ? selectedPks.add(cb.dataset.pk!) : selectedPks.delete(cb.dataset.pk!);
+    updateCheckAll();
+    updateDeleteBtn();
+  });
   document.getElementById('btn-copy-query')!.addEventListener('click', () => {
     const sqlText = editor.state.doc.toString().trim();
     if (sqlText) copyText(sqlText, document.getElementById('btn-copy-query')!);
@@ -127,24 +153,59 @@ function init() {
 
   document.getElementById('t-body')!.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    closeCtxMenu();
     const tr = (e.target as HTMLElement).closest('tr') as HTMLElement | null;
     if (!tr || !currentData) return;
     const rowIndex = Array.from(tr.parentElement!.children).indexOf(tr);
-    const rows = filteredRows();
-    const row = rows[currentPage * PAGE_SIZE + rowIndex];
+    const row = filteredRows()[currentPage * PAGE_SIZE + rowIndex];
     if (!row) return;
-    const table = currentTable || 'table_name';
-    const cols = currentData.columns.map((c) => `"${c}"`).join(', ');
-    const vals = currentData.columns.map((c) => {
-      const v = row[c];
-      if (v === null || v === undefined) return 'NULL';
-      if (typeof v === 'number') return String(v);
-      return `'${String(v).replace(/'/g, "''")}'`;
-    }).join(', ');
-    const insert = `INSERT INTO "${table}" (${cols}) VALUES (${vals});`;
-    navigator.clipboard.writeText(insert).then(() => {
-      showToast('INSERT copied to clipboard');
-    }).catch(() => {});
+
+    const menu = document.createElement('div');
+    menu.id = 'ctx-menu';
+
+    const copyItem = document.createElement('div');
+    copyItem.className = 'ctx-item';
+    copyItem.textContent = '📋 Copy as INSERT';
+    copyItem.addEventListener('click', () => {
+      closeCtxMenu();
+      const q = quoteIdentifier;
+      const table = currentTable || 'table_name';
+      const tableRef = currentSchema ? `${q(currentSchema)}.${q(table)}` : q(table);
+      const cols = currentData!.columns.map((c) => q(c)).join(', ');
+      const vals = currentData!.columns.map((c) => {
+        const v = row[c];
+        if (v === null || v === undefined) return 'NULL';
+        if (typeof v === 'number') return String(v);
+        return `'${String(v).replace(/'/g, "''")}'`;
+      }).join(', ');
+      navigator.clipboard.writeText(`INSERT INTO ${tableRef} (${cols}) VALUES (${vals});`)
+        .then(() => showToast('INSERT copied')).catch(() => {});
+    });
+    menu.appendChild(copyItem);
+
+    if (currentTable && primaryKeys.length > 0) {
+      const delItem = document.createElement('div');
+      delItem.className = 'ctx-item ctx-danger';
+      delItem.textContent = '🗑 Delete row';
+      delItem.addEventListener('click', () => {
+        closeCtxMenu();
+        const q = quoteIdentifier;
+        const tableRef = currentSchema ? `${q(currentSchema)}.${q(currentTable)}` : q(currentTable);
+        const where = primaryKeys.map((k) => {
+          const v = row[k];
+          if (v === null || v === undefined) return `${q(k)} IS NULL`;
+          const n = Number(v);
+          return `${q(k)} = ${!isNaN(n) && String(v).trim() !== '' ? v : `'${String(v).replace(/'/g, "''")}'`}`;
+        }).join(' AND ');
+        vscode.postMessage({ type: 'deleteRow', sql: `DELETE FROM ${tableRef} WHERE ${where}` });
+      });
+      menu.appendChild(delItem);
+    }
+
+    menu.style.left = `${Math.min(e.clientX, window.innerWidth - 180)}px`;
+    menu.style.top  = `${Math.min(e.clientY, window.innerHeight - 80)}px`;
+    document.body.appendChild(menu);
+    setTimeout(() => document.addEventListener('click', closeCtxMenu, { once: true }), 0);
   });
 
   document.getElementById('t-body')!.addEventListener('click', (e) => {
@@ -189,6 +250,7 @@ function init() {
 function runQuery() {
   const sqlText = editor.state.doc.toString().trim();
   if (!sqlText) return;
+  runningSQL = sqlText;
   baseQuery = sqlText.replace(/\s+ORDER\s+BY\s+[\s\S]*$/i, '').trim() || sqlText;
   historyIndex = -1;
   showLoading();
@@ -212,11 +274,25 @@ function showResults(data: QueryResult) {
   filterText = '';
   sortCol = null;
   sortDir = 'asc';
+  selectedPks.clear();
   (document.getElementById('filter-input') as HTMLInputElement).value = '';
 
   hide('loading-section'); hide('error-section');
-
   document.getElementById('query-time')!.textContent = `${data.duration} ms`;
+
+  // Sync table context from executed SQL
+  const detected = detectTableFromSQL(runningSQL);
+  const detectedName = detected?.name ?? '';
+  if (detectedName !== currentTable) {
+    currentTable = '';
+    primaryKeys  = [];
+    columnDefs   = [];
+    (document.getElementById('btn-insert-row')  as HTMLButtonElement).hidden = true;
+    (document.getElementById('btn-delete-rows') as HTMLButtonElement).hidden = true;
+    if (detected) {
+      vscode.postMessage({ type: 'getTableMeta', table: detected.name, schema: detected.schema });
+    }
+  }
 
   renderHeaders();
   renderPage();
@@ -235,11 +311,28 @@ function setEditorContent(content: string) {
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: content } });
 }
 
+// ── Table detection ───────────────────────────────────────────────────────────
+
+function detectTableFromSQL(sql: string): { name: string; schema: string } | null {
+  const clean = sql.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+  if (!/^\s*SELECT\b/i.test(clean)) return null;   // only SELECT
+  if (/\bJOIN\b/i.test(clean)) return null;         // skip JOINs — ambiguous table
+  const m = clean.match(
+    /\bFROM\s+[`"[]?(\w+)[`"\]]?\s*\.\s*[`"[]?(\w+)[`"\]]?\s*(?:$|\s|;)/i,
+  );
+  if (m) return { schema: m[1], name: m[2] };
+  const m2 = clean.match(/\bFROM\s+[`"[]?(\w+)[`"\]]?\s*(?:$|\s|;)/i);
+  if (m2) return { schema: '', name: m2[1] };
+  return null;
+}
+
 // ── Pagination + Filter ───────────────────────────────────────────────────────
 
 function renderHeaders() {
   if (!currentData) return;
-  document.getElementById('t-head')!.innerHTML = currentData.columns
+  const hasKeys = currentTable && primaryKeys.length > 0;
+  const checkTh = hasKeys ? `<th class="col-check"><input type="checkbox" id="check-all" title="Select all"></th>` : '';
+  document.getElementById('t-head')!.innerHTML = checkTh + currentData.columns
     .map((c) => {
       const active = c === sortCol;
       const arrow = active ? `<span class="sort-arrow">${sortDir === 'asc' ? '▲' : '▼'}</span>` : '';
@@ -285,9 +378,13 @@ function renderPage() {
   const editable = currentTable && primaryKeys.length > 0;
   document.getElementById('t-body')!.innerHTML = pageRows
     .map((row) => {
-      const pkJson = editable ? esc(JSON.stringify(Object.fromEntries(primaryKeys.map((k) => [k, row[k]])))) : '';
-      const rowAttr = editable ? ` data-pk="${pkJson}"` : '';
-      return `<tr${rowAttr}>${currentData!.columns.map((col) => {
+      const rawPk  = editable ? JSON.stringify(Object.fromEntries(primaryKeys.map((k) => [k, row[k]]))) : '';
+      const pkJson = editable ? esc(rawPk) : '';
+      const rowAttr  = editable ? ` data-pk="${pkJson}"` : '';
+      const checkTd  = editable
+        ? `<td class="col-check"><input type="checkbox" class="row-check" data-pk="${pkJson}"${selectedPks.has(rawPk) ? ' checked' : ''}></td>`
+        : '';
+      return `<tr${rowAttr}>${checkTd}${currentData!.columns.map((col) => {
         const val = row[col];
         const isPk = primaryKeys.includes(col);
         const colAttr = editable && !isPk ? ` class="cell-editable" data-col="${esc(col)}"` : '';
@@ -644,6 +741,121 @@ function commitCellEdit(column: string, pkValues: Record<string, unknown>, newVa
   });
 }
 
+function closeCtxMenu() { document.getElementById('ctx-menu')?.remove(); }
+
+function updateDeleteBtn() {
+  const btn = document.getElementById('btn-delete-rows') as HTMLButtonElement | null;
+  if (btn) btn.disabled = selectedPks.size === 0;
+}
+
+function updateCheckAll() {
+  const checkAll = document.getElementById('check-all') as HTMLInputElement | null;
+  if (!checkAll || !currentData) return;
+  const pageRows = filteredRows().slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const sel = pageRows.filter((row) =>
+    selectedPks.has(JSON.stringify(Object.fromEntries(primaryKeys.map((k) => [k, row[k]]))))).length;
+  checkAll.checked       = sel > 0 && sel === pageRows.length;
+  checkAll.indeterminate = sel > 0 && sel < pageRows.length;
+}
+
+function deleteSelectedRows() {
+  if (!selectedPks.size || !currentTable || !primaryKeys.length) return;
+  const q = quoteIdentifier;
+  const tableRef = currentSchema ? `${q(currentSchema)}.${q(currentTable)}` : q(currentTable);
+  const sqls = Array.from(selectedPks).map((rawPk) => {
+    const pkValues = JSON.parse(rawPk) as Record<string, unknown>;
+    const where = primaryKeys.map((k) => {
+      const v = pkValues[k];
+      if (v === null || v === undefined) return `${q(k)} IS NULL`;
+      const n = Number(v);
+      return `${q(k)} = ${!isNaN(n) && String(v).trim() !== '' ? v : `'${String(v).replace(/'/g, "''")}'`}`;
+    }).join(' AND ');
+    return `DELETE FROM ${tableRef} WHERE ${where}`;
+  });
+  vscode.postMessage({ type: 'deleteRows', sqls });
+}
+
+// ── Insert Row Modal ──────────────────────────────────────────────────────────
+
+function showInsertModal() {
+  if (!currentTable || !columnDefs.length) return;
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const autoDateRe = /^(created_at|updated_at|created_date|updated_date|createdat|updatedat)$/i;
+
+  const fields = columnDefs.map((col) => {
+    const isPk  = primaryKeys.includes(col.name);
+    const isDate = autoDateRe.test(col.name);
+    const val   = isDate ? now : '';
+    const badge = isPk ? `<span class="insert-badge insert-pk">PK</span>` : (!col.nullable ? `<span class="insert-badge insert-req">*</span>` : '');
+    return `<div class="insert-field">
+      <label class="insert-label">${esc(col.name)}${badge}<span class="insert-type">${esc(col.type)}</span></label>
+      <input class="insert-input" name="${esc(col.name)}" value="${esc(val)}" placeholder="${col.nullable ? 'NULL' : ''}">
+    </div>`;
+  }).join('');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'insert-overlay';
+  overlay.innerHTML = `
+    <div id="insert-modal">
+      <div id="insert-modal-header">
+        <span>Insert into <strong>${esc(currentTable)}</strong></span>
+        <button id="insert-close" class="btn-icon">✕</button>
+      </div>
+      <div id="insert-modal-body">${fields}</div>
+      <div id="insert-error" class="insert-error" hidden></div>
+      <div id="insert-modal-footer">
+        <button id="insert-cancel" class="btn btn-sm">Cancel</button>
+        <button id="insert-confirm" class="btn btn-sm btn-primary">Insert</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeInsertModal(); });
+  document.getElementById('insert-close')!.addEventListener('click', closeInsertModal);
+  document.getElementById('insert-cancel')!.addEventListener('click', closeInsertModal);
+  document.getElementById('insert-confirm')!.addEventListener('click', submitInsert);
+  document.addEventListener('keydown', onInsertKeydown);
+
+  const first = overlay.querySelector<HTMLInputElement>('.insert-input:not([value])') ??
+                overlay.querySelector<HTMLInputElement>('.insert-input');
+  first?.focus();
+}
+
+function onInsertKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeInsertModal();
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitInsert();
+}
+
+function closeInsertModal() {
+  document.getElementById('insert-overlay')?.remove();
+  document.removeEventListener('keydown', onInsertKeydown);
+}
+
+function quoteIdentifier(name: string): string {
+  return dbType === 'mysql' ? `\`${name}\`` : `"${name}"`;
+}
+
+function submitInsert() {
+  const overlay = document.getElementById('insert-overlay');
+  if (!overlay) return;
+  const inputs = overlay.querySelectorAll<HTMLInputElement>('.insert-input');
+  const q = quoteIdentifier;
+  const tableRef = currentSchema ? `${q(currentSchema)}.${q(currentTable)}` : q(currentTable);
+  const cols: string[] = [];
+  const vals: string[] = [];
+  inputs.forEach((inp) => {
+    cols.push(q(inp.name));
+    const v = inp.value;
+    if (v === '') { vals.push('NULL'); return; }
+    const n = Number(v);
+    vals.push(!isNaN(n) && v.trim() !== '' ? v : `'${v.replace(/'/g, "''")}'`);
+  });
+  const sql = `INSERT INTO ${tableRef} (${cols.join(', ')}) VALUES (${vals.join(', ')})`;
+  const errEl = document.getElementById('insert-error');
+  if (errEl) errEl.hidden = true;
+  vscode.postMessage({ type: 'insertRow', sql });
+}
+
 function showToast(msg: string) {
   let toast = document.getElementById('toast');
   if (!toast) {
@@ -695,8 +907,12 @@ const MESSAGE_HANDLERS: Record<string, MsgHandler> = {
     currentTable    = (msg.tableName as string) || '';
     currentSchema   = (msg.schema as string) || '';
     primaryKeys     = (msg.primaryKeys as string[]) || [];
+    columnDefs      = (msg.columnDefs as typeof columnDefs) || [];
+    dbType          = (msg.dbType as string) || '';
     document.getElementById('conn-name')!.textContent = msg.connectionName as string;
     document.getElementById('db-name')!.textContent   = msg.database as string;
+    (document.getElementById('btn-insert-row')  as HTMLButtonElement).hidden = !currentTable;
+    (document.getElementById('btn-delete-rows') as HTMLButtonElement).hidden = !(currentTable && primaryKeys.length > 0);
     updateBookmarks((msg.bookmarks as Bookmark[]) ?? []);
     updateHistory((msg.history as HistoryEntry[]) ?? []);
     if (msg.query) setEditorContent(msg.query as string);
@@ -712,6 +928,27 @@ const MESSAGE_HANDLERS: Record<string, MsgHandler> = {
   history:         (msg) => updateHistory(msg.items as HistoryEntry[]),
   reloadData:      ()    => { if (!editingCell) runQuery(); },
   updateCellError: (msg) => showError(msg.message as string),
+  insertRowSuccess: ()   => { closeInsertModal(); showToast('Row inserted'); },
+  insertRowError:  (msg) => {
+    const errEl = document.getElementById('insert-error');
+    if (errEl) { errEl.textContent = msg.message as string; errEl.hidden = false; }
+  },
+  tableMeta: (msg) => {
+    currentTable  = msg.table as string;
+    currentSchema = (msg.schema as string) || currentSchema;
+    primaryKeys   = (msg.primaryKeys as string[]) || [];
+    columnDefs    = (msg.columnDefs as typeof columnDefs) || [];
+    (document.getElementById('btn-insert-row')  as HTMLButtonElement).hidden = !currentTable;
+    (document.getElementById('btn-delete-rows') as HTMLButtonElement).hidden = !(currentTable && primaryKeys.length > 0);
+    renderHeaders();
+    renderPage();
+  },
+  deleteRowsSuccess: (msg) => {
+    selectedPks.clear();
+    updateDeleteBtn();
+    showToast(`${msg.count as number} row(s) deleted`);
+  },
+  deleteRowError:  (msg) => showToast(`Error: ${msg.message as string}`),
 };
 
 window.addEventListener('message', (event) => {

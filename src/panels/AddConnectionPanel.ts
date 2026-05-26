@@ -308,16 +308,16 @@ function buildHtml(nonce: string): string {
 </div>
 
 <script nonce="${nonce}">
-  const vscode = acquireVsCodeApi();
-  let dbType = 'mysql';
-
-  var PORTS = { mysql:3306, postgres:5432, mssql:1433, oracle:1521, mongodb:27017, redis:6379 };
+  var vscode = acquireVsCodeApi();
+  var dbType = 'mysql';
+  var connStrRaw = '';
+  var PORTS = {mysql:3306,postgres:5432,mssql:1433,oracle:1521,mongodb:27017,redis:6379};
 
   document.querySelectorAll('.db-card').forEach(function(card) {
     card.addEventListener('click', function() {
-      document.querySelectorAll('.db-card').forEach(function(c){ c.classList.remove('selected'); });
-      card.classList.add('selected');
       dbType = card.dataset.type;
+      document.querySelectorAll('.db-card').forEach(function(c){c.classList.remove('selected');});
+      card.classList.add('selected');
       switchForm();
     });
   });
@@ -326,96 +326,79 @@ function buildHtml(nonce: string): string {
     var isSqlite  = dbType === 'sqlite';
     var isGraphql = dbType === 'graphql';
     var isServer  = !isSqlite && !isGraphql;
-
     document.getElementById('server-fields').hidden  = !isServer;
     document.getElementById('sqlite-fields').hidden  = !isSqlite;
     document.getElementById('graphql-fields').hidden = !isGraphql;
-
-    if (isServer) {
-      document.getElementById('f-port').value = PORTS[dbType] || 3306;
-
-      var isOracle  = dbType === 'oracle';
-      var isMssql   = dbType === 'mssql';
-      var isRedis   = dbType === 'redis';
-
-      // user field: hidden for Redis (optional), visible for rest
-      document.getElementById('user-group').hidden   = false;
-      document.getElementById('f-user').placeholder  = isRedis ? 'ACL username (optional)' : (isMssql ? 'sa' : 'root');
-
-      // database field
-      document.getElementById('db-group').hidden     = isOracle || isRedis;
-      document.getElementById('f-db').placeholder    = isMssql ? 'master' : '';
-      document.getElementById('db-label').innerHTML  = 'Database <span>(optional)</span>';
-
-      // Oracle service name
-      document.getElementById('service-group').hidden = !isOracle;
-
-      // MSSQL encrypt / trust cert
-      document.getElementById('encrypt-group').hidden = !isMssql;
-      document.getElementById('trust-cert-group').hidden = !isMssql;
-    }
+    if (!isServer) return;
+    document.getElementById('f-port').value = PORTS[dbType] || 3306;
+    var isOracle = dbType === 'oracle';
+    var isMssql  = dbType === 'mssql';
+    var isRedis  = dbType === 'redis';
+    document.getElementById('user-group').hidden = false;
+    document.getElementById('f-user').placeholder = isRedis ? 'ACL username (optional)' : (isMssql ? 'sa' : 'root');
+    document.getElementById('db-group').hidden    = isOracle || isRedis;
+    document.getElementById('f-db').placeholder   = isMssql ? 'master' : '';
+    document.getElementById('db-label').innerHTML = 'Database <span>(optional)</span>';
+    document.getElementById('service-group').hidden    = !isOracle;
+    document.getElementById('encrypt-group').hidden    = !isMssql;
+    document.getElementById('trust-cert-group').hidden = !isMssql;
   }
 
   document.getElementById('browse-btn').addEventListener('click', function() {
-    vscode.postMessage({ type: 'browse' });
+    vscode.postMessage({type:'browse'});
   });
 
   function getConfig() {
-    var name = document.getElementById('f-name').value.trim();
+    var name = (document.getElementById('f-name').value||'').trim();
     if (!name) { showStatus('Connection name is required', false); return null; }
-
-    if (dbType === 'sqlite') {
-      var filename = document.getElementById('f-file').value.trim();
-      if (!filename) { showStatus('File path is required', false); return null; }
-      return { name:name, type:'sqlite', filename:filename };
+    if (dbType==='sqlite') {
+      var fname = (document.getElementById('f-file').value||'').trim();
+      if (!fname) { showStatus('File path is required', false); return null; }
+      return {name:name, type:'sqlite', filename:fname};
     }
-
-    if (dbType === 'graphql') {
-      var url = document.getElementById('f-url').value.trim();
-      if (!url) { showStatus('Endpoint URL is required', false); return null; }
-      var headersStr = document.getElementById('f-headers').value.trim();
-      var headers = {};
-      if (headersStr) {
-        try { headers = JSON.parse(headersStr); } catch(e) { showStatus('Headers must be valid JSON', false); return null; }
-      }
-      return { name:name, type:'graphql', url:url, headers:headers };
+    if (dbType==='graphql') {
+      var gurl = (document.getElementById('f-url').value||'').trim();
+      if (!gurl) { showStatus('Endpoint URL is required', false); return null; }
+      var hstr = (document.getElementById('f-headers').value||'').trim();
+      var hdrs = {};
+      if (hstr) { try { hdrs=JSON.parse(hstr); } catch(e) { showStatus('Headers must be valid JSON', false); return null; } }
+      return {name:name, type:'graphql', url:gurl, headers:hdrs};
     }
-
-    var host    = document.getElementById('f-host').value.trim() || '127.0.0.1';
-    var port    = parseInt(document.getElementById('f-port').value) || PORTS[dbType] || 3306;
-    var user    = document.getElementById('f-user').value;
-    var pass    = document.getElementById('f-pass').value;
-
-    if (dbType === 'oracle') {
-      var svc = document.getElementById('f-service').value.trim() || 'XEPDB1';
-      return { name:name, type:'oracle', host:host, port:port, user:user, password:pass, serviceName:svc };
+    var host = (document.getElementById('f-host').value||'').trim()||'127.0.0.1';
+    var port = parseInt(document.getElementById('f-port').value,10)||PORTS[dbType]||3306;
+    var user = document.getElementById('f-user').value||'';
+    var pass = document.getElementById('f-pass').value||'';
+    if (dbType==='oracle') {
+      var svc = (document.getElementById('f-service').value||'').trim()||'XEPDB1';
+      return {name:name, type:'oracle', host:host, port:port, user:user, password:pass, serviceName:svc};
     }
-
-    if (dbType === 'redis') {
-      return { name:name, type:'redis', host:host, port:port, password:pass };
+    if (dbType==='redis') {
+      return {name:name, type:'redis', host:host, port:port, password:pass, url:connStrRaw||undefined};
     }
-
-    var db        = document.getElementById('f-db').value.trim();
-    var encrypt   = document.getElementById('f-encrypt') && document.getElementById('f-encrypt').checked;
-    var trustCert = document.getElementById('f-trust-cert') && document.getElementById('f-trust-cert').checked;
-    var cfg = { name:name, type:dbType, host:host, port:port, user:user, password:pass, database:db||undefined };
-    if (dbType === 'mssql') { cfg.encrypt = encrypt; cfg.trustServerCertificate = trustCert; }
+    if (dbType==='mongodb') {
+      return {name:name, type:'mongodb', host:host, port:port, user:user, password:pass, url:connStrRaw||undefined};
+    }
+    var db = (document.getElementById('f-db').value||'').trim();
+    var encrypt   = document.getElementById('f-encrypt')   ? document.getElementById('f-encrypt').checked   : false;
+    var trustCert = document.getElementById('f-trust-cert') ? document.getElementById('f-trust-cert').checked : false;
+    var cfg = {name:name, type:dbType, host:host, port:port, user:user, password:pass, database:db||undefined};
+    if (dbType==='mssql') { cfg.encrypt=encrypt; cfg.trustServerCertificate=trustCert; }
     return cfg;
   }
 
   document.getElementById('test-btn').addEventListener('click', function() {
-    var config = getConfig();
-    if (!config) return;
+    var cfg = getConfig();
+    if (!cfg) return;
     setLoading(true, 'Testing connection…');
-    vscode.postMessage({ type:'testConnection', config:config });
+    vscode.postMessage({type:'testConnection', config:cfg});
   });
 
   document.getElementById('frm').addEventListener('submit', function(e) {
     e.preventDefault();
-    var config = getConfig();
-    if (!config) return;
+    var cfg = getConfig();
+    if (!cfg) return;
     setLoading(true, 'Connecting and saving…');
-    vscode.postMessage({ type:'saveConnection', config:config });
+    vscode.postMessage({type:'saveConnection', config:cfg});
   });
 
   function setLoading(on, msg) {
@@ -427,16 +410,16 @@ function buildHtml(nonce: string): string {
   function showStatus(msg, ok) {
     var el = document.getElementById('status');
     el.textContent = msg;
-    el.className = ok === true ? 'ok' : ok === false ? 'err' : '';
+    el.className = ok===true ? 'ok' : ok===false ? 'err' : '';
     el.hidden = false;
   }
 
-  window.addEventListener('message', function(event) {
-    var msg = event.data;
+  window.addEventListener('message', function(e) {
+    var msg = e.data;
     setLoading(false, null);
-    if (msg.type === 'testResult') showStatus(msg.message, msg.success);
-    if (msg.type === 'saveResult')  showStatus(msg.message, false);
-    if (msg.type === 'filePicked')  document.getElementById('f-file').value = msg.path;
+    if (msg.type==='testResult') showStatus(msg.message, msg.success);
+    if (msg.type==='saveResult') showStatus(msg.message, false);
+    if (msg.type==='filePicked') document.getElementById('f-file').value = msg.path;
   });
 </script>
 </body>
