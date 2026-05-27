@@ -1,7 +1,7 @@
 {
-  "name": "db-connection",
-  "displayName": "DB Connection",
-  "description": "Visual database manager – browse connections, query tables, export results",
+  "name": "queryforge",
+  "displayName": "QueryForge",
+  "description": "QueryForge – Visual database manager: browse connections, query tables, export results",
   "version": "0.1.0",
   "publisher": "db-connection",
   "engines": {
@@ -19,7 +19,7 @@
       "activitybar": [
         {
           "id": "db-connection",
-          "title": "DB Connection",
+          "title": "QueryForge",
           "icon": "resources/database.svg"
         }
       ]
@@ -37,67 +37,67 @@
         "command": "dbConnection.addConnection",
         "title": "Add Connection",
         "icon": "$(add)",
-        "category": "DB Connection"
+        "category": "QueryForge"
       },
       {
         "command": "dbConnection.refreshConnections",
         "title": "Refresh",
         "icon": "$(refresh)",
-        "category": "DB Connection"
+        "category": "QueryForge"
       },
       {
         "command": "dbConnection.deleteConnection",
         "title": "Delete Connection",
         "icon": "$(trash)",
-        "category": "DB Connection"
+        "category": "QueryForge"
       },
       {
         "command": "dbConnection.testConnection",
         "title": "Test Connection",
         "icon": "$(plug)",
-        "category": "DB Connection"
+        "category": "QueryForge"
       },
       {
         "command": "dbConnection.openTable",
         "title": "Open Table",
         "icon": "$(table)",
-        "category": "DB Connection"
+        "category": "QueryForge"
       },
       {
         "command": "dbConnection.openQueryEditor",
         "title": "New Query",
         "icon": "$(new-file)",
-        "category": "DB Connection"
+        "category": "QueryForge"
       },
       {
         "command": "dbConnection.disconnectConnection",
         "title": "Disconnect",
         "icon": "$(debug-disconnect)",
-        "category": "DB Connection"
+        "category": "QueryForge"
       },
       {
         "command": "dbConnection.viewDDL",
         "title": "View DDL",
         "icon": "$(code)",
-        "category": "DB Connection"
+        "category": "QueryForge"
       },
       {
         "command": "dbConnection.openTableInNewTab",
         "title": "Open in New Tab",
         "icon": "$(split-horizontal)",
-        "category": "DB Connection"
+        "category": "QueryForge"
       },
       {
         "command": "dbConnection.editConnection",
         "title": "Edit Connection",
         "icon": "$(edit)",
-        "category": "DB Connection"
+        "category": "QueryForge"
       },
       {
         "command": "dbConnection.openProcedure",
         "title": "Open Procedure / Function",
         "icon": "$(symbol-method)",
-        "category": "DB Connection"
+        "category": "QueryForge"
       }
     ],
     "menus": {
