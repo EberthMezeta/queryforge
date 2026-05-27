@@ -114,6 +114,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  context.subscriptions.push({
+    dispose: () => {
+      storage.getConnections().then((configs) => {
+        for (const c of configs) provider.disconnect(c.id).catch(() => {});
+      }).catch(() => {});
+    },
+  });
+
   const savedConnections = await storage.getConnections();
   if (savedConnections.length > 0) {
     Promise.allSettled(

@@ -9,10 +9,24 @@
   },
   "categories": [
     "Other",
-    "Data Science"
+    "Data Science",
+    "Visualization"
   ],
+  "icon": "resources/icon.png",
   "license": "MIT",
-  "activationEvents": [],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eberth-dev/queryforge"
+  },
+  "bugs": {
+    "url": "https://github.com/eberth-dev/queryforge/issues"
+  },
+  "homepage": "https://github.com/eberth-dev/queryforge#readme",
+  "keywords": [
+    "database", "sql", "postgresql", "mysql", "sqlite", "mssql",
+    "oracle", "mongodb", "redis", "graphql", "query", "db", "explorer"
+  ],
+  "activationEvents": ["onStartupFinished"],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {

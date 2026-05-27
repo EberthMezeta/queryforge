@@ -4,6 +4,9 @@ import { ISchemaAdapter, IProcedureAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
 import { DEFAULT_PREVIEW_LIMIT, MAX_PG_SESSION_CLIENTS } from '../constants';
 
+// Escape a PostgreSQL double-quoted identifier: doubles any " inside the name.
+function escId(s: string): string { return '"' + s.replace(/"/g, '""') + '"'; }
+
 export class PostgresAdapter extends BaseAdapter implements ISchemaAdapter, IProcedureAdapter {
   private mainClient: Client | null = null;
   private sessionClients = new Map<string, Client>();
@@ -42,8 +45,8 @@ export class PostgresAdapter extends BaseAdapter implements ISchemaAdapter, IPro
 
   buildDefaultQuery(table: string, schema?: string): string {
     return schema
-      ? `SELECT * FROM "${schema}"."${table}" LIMIT ${DEFAULT_PREVIEW_LIMIT}`
-      : `SELECT * FROM "${table}" LIMIT ${DEFAULT_PREVIEW_LIMIT}`;
+      ? `SELECT * FROM ${escId(schema)}.${escId(table)} LIMIT ${DEFAULT_PREVIEW_LIMIT}`
+      : `SELECT * FROM ${escId(table)} LIMIT ${DEFAULT_PREVIEW_LIMIT}`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
@@ -179,8 +182,8 @@ export class PostgresAdapter extends BaseAdapter implements ISchemaAdapter, IPro
     const client = await this.getSessionClient(database);
     const pkEntries = Object.entries(pkValues);
     const params: unknown[] = [newValue];
-    const where = pkEntries.map(([k, v], i) => { params.push(v); return `"${k}" = $${i + 2}`; }).join(' AND ');
-    await client.query(`UPDATE "${schema}"."${table}" SET "${column}" = $1 WHERE ${where}`, params);
+    const where = pkEntries.map(([k, v], i) => { params.push(v); return `${escId(k)} = $${i + 2}`; }).join(' AND ');
+    await client.query(`UPDATE ${escId(schema)}.${escId(table)} SET ${escId(column)} = $1 WHERE ${where}`, params);
   }
 
   private async getSessionClient(database: string): Promise<Client> {

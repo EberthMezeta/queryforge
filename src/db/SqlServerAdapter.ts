@@ -4,6 +4,9 @@ import { ISchemaAdapter, IProcedureAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
 import { DEFAULT_PREVIEW_LIMIT } from '../constants';
 
+// Escape a SQL Server bracket-quoted identifier: doubles any ] inside the name.
+function escId(s: string): string { return '[' + s.replace(/]/g, ']]') + ']'; }
+
 // ── Internal type guards ──────────────────────────────────────────────────────
 
 function requireString(value: unknown, field: string): string {
@@ -72,8 +75,8 @@ export class SqlServerAdapter extends BaseAdapter implements ISchemaAdapter, IPr
 
   buildDefaultQuery(table: string, schema?: string): string {
     return schema
-      ? `SELECT TOP ${DEFAULT_PREVIEW_LIMIT} * FROM [${schema}].[${table}]`
-      : `SELECT TOP ${DEFAULT_PREVIEW_LIMIT} * FROM [${table}]`;
+      ? `SELECT TOP ${DEFAULT_PREVIEW_LIMIT} * FROM ${escId(schema)}.${escId(table)}`
+      : `SELECT TOP ${DEFAULT_PREVIEW_LIMIT} * FROM ${escId(table)}`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
@@ -91,7 +94,7 @@ export class SqlServerAdapter extends BaseAdapter implements ISchemaAdapter, IPr
     this.assertConnected();
     const result = await this.pool!.request().query(`
       SELECT TABLE_NAME AS name, TABLE_TYPE AS type, TABLE_SCHEMA AS schema
-      FROM [${database}].INFORMATION_SCHEMA.TABLES
+      FROM ${escId(database)}.INFORMATION_SCHEMA.TABLES
       WHERE TABLE_SCHEMA NOT IN ('sys', 'INFORMATION_SCHEMA')
       ORDER BY TABLE_SCHEMA, TABLE_TYPE, TABLE_NAME
     `);
@@ -112,7 +115,7 @@ export class SqlServerAdapter extends BaseAdapter implements ISchemaAdapter, IPr
       .input('table', mssql.VarChar, table)
       .query(`
         SELECT COLUMN_NAME AS name, DATA_TYPE AS type, IS_NULLABLE AS nullable
-        FROM [${database}].INFORMATION_SCHEMA.COLUMNS
+        FROM ${escId(database)}.INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @table
         ORDER BY ORDINAL_POSITION
       `);
@@ -126,7 +129,7 @@ export class SqlServerAdapter extends BaseAdapter implements ISchemaAdapter, IPr
     this.assertConnected();
     const req = this.pool!.request();
     const start = Date.now();
-    const fullSql = database ? `USE [${database}]; ${sql}` : sql;
+    const fullSql = database ? `USE ${escId(database)}; ${sql}` : sql;
     const result = await req.query(fullSql);
     const rs = result.recordset ?? [];
     const affected = result.rowsAffected[0] ?? 0;
@@ -151,7 +154,7 @@ export class SqlServerAdapter extends BaseAdapter implements ISchemaAdapter, IPr
             CASE WHEN IS_NULLABLE = 'NO' THEN ' NOT NULL' ELSE ' NULL' END,
             ',' + CHAR(10)
           ) WITHIN GROUP (ORDER BY ORDINAL_POSITION) + CHAR(10) + ');' AS ddl
-        FROM [${database}].INFORMATION_SCHEMA.COLUMNS
+        FROM ${escId(database)}.INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_NAME = @table AND TABLE_SCHEMA = @schema
         GROUP BY TABLE_SCHEMA, TABLE_NAME
       `);
@@ -162,7 +165,7 @@ export class SqlServerAdapter extends BaseAdapter implements ISchemaAdapter, IPr
     this.assertConnected();
     const result = await this.pool!.request().query(`
       SELECT ROUTINE_NAME AS name, ROUTINE_TYPE AS type, ROUTINE_SCHEMA AS schema
-      FROM [${database}].INFORMATION_SCHEMA.ROUTINES
+      FROM ${escId(database)}.INFORMATION_SCHEMA.ROUTINES
       WHERE ROUTINE_SCHEMA NOT IN ('sys', 'INFORMATION_SCHEMA')
       ORDER BY ROUTINE_SCHEMA, ROUTINE_TYPE, ROUTINE_NAME
     `);
@@ -179,7 +182,7 @@ export class SqlServerAdapter extends BaseAdapter implements ISchemaAdapter, IPr
   async getProcedureDefinition(database: string, name: string, _type?: string, schema = 'dbo'): Promise<string> {
     this.assertConnected();
     const result = await this.pool!.request().query(
-      `SELECT OBJECT_DEFINITION(OBJECT_ID('[${database}].[${schema.replace(/]/g, ']]')}].[${name.replace(/]/g, ']]')}]')) AS def`,
+      `SELECT OBJECT_DEFINITION(OBJECT_ID('${escId(database)}.${escId(schema)}.${escId(name)}')) AS def`,
     );
     const def = result.recordset[0]?.def;
     return def != null ? requireString(def, 'def') : '';
@@ -192,8 +195,8 @@ export class SqlServerAdapter extends BaseAdapter implements ISchemaAdapter, IPr
       .input('table', mssql.VarChar, table)
       .query(`
         SELECT kcu.COLUMN_NAME
-        FROM [${database}].INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-        JOIN [${database}].INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+        FROM ${escId(database)}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+        JOIN ${escId(database)}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
           ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
         WHERE tc.TABLE_SCHEMA = @schema AND tc.TABLE_NAME = @table
           AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
@@ -208,7 +211,7 @@ export class SqlServerAdapter extends BaseAdapter implements ISchemaAdapter, IPr
     const req = this.pool!.request();
     req.input('newVal', newValue);
     pkEntries.forEach(([, v], i) => req.input(`pk${i}`, v));
-    const where = pkEntries.map(([k], i) => `[${k}] = @pk${i}`).join(' AND ');
-    await req.query(`UPDATE [${database}].[${schema}].[${table}] SET [${column}] = @newVal WHERE ${where}`);
+    const where = pkEntries.map(([k], i) => `${escId(k)} = @pk${i}`).join(' AND ');
+    await req.query(`UPDATE ${escId(database)}.${escId(schema)}.${escId(table)} SET ${escId(column)} = @newVal WHERE ${where}`);
   }
 }

@@ -4,6 +4,9 @@ import { ISchemaAdapter, IProcedureAdapter } from './IAdapter';
 import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, ProcedureInfo } from '../types';
 import { DEFAULT_PREVIEW_LIMIT } from '../constants';
 
+// Escape a MySQL backtick-quoted identifier: doubles any backtick inside the name.
+function escId(s: string): string { return '`' + s.replace(/`/g, '``') + '`'; }
+
 export class MysqlAdapter extends BaseAdapter implements ISchemaAdapter, IProcedureAdapter {
   private pool: mysql.Pool | null = null;
   private connected = false;
@@ -38,7 +41,7 @@ export class MysqlAdapter extends BaseAdapter implements ISchemaAdapter, IProced
   isConnected(): boolean { return this.connected; }
 
   buildDefaultQuery(table: string, _schema?: string): string {
-    return `SELECT * FROM \`${table}\` LIMIT ${DEFAULT_PREVIEW_LIMIT}`;
+    return `SELECT * FROM ${escId(table)} LIMIT ${DEFAULT_PREVIEW_LIMIT}`;
   }
 
   async getDatabases(): Promise<DatabaseInfo[]> {
@@ -90,7 +93,7 @@ export class MysqlAdapter extends BaseAdapter implements ISchemaAdapter, IProced
     const conn = await this.pool!.getConnection();
     this.activeConn = conn;
     try {
-      if (database) await conn.query(`USE \`${database}\``);
+      if (database) await conn.query(`USE ${escId(database)}`);
       const start = Date.now();
       const [rows, fields] = await conn.query(sql);
       const duration = Date.now() - start;
@@ -124,8 +127,8 @@ export class MysqlAdapter extends BaseAdapter implements ISchemaAdapter, IProced
     this.assertConnected();
     const conn = await this.pool!.getConnection();
     try {
-      await conn.query(`USE \`${database}\``);
-      const [rows] = await conn.query<mysql.RowDataPacket[]>(`SHOW CREATE TABLE \`${table}\``);
+      await conn.query(`USE ${escId(database)}`);
+      const [rows] = await conn.query<mysql.RowDataPacket[]>(`SHOW CREATE TABLE ${escId(table)}`);
       return (rows[0]?.['Create Table'] ?? rows[0]?.['Create View'] ?? '') as string;
     } finally {
       conn.release();
@@ -162,11 +165,11 @@ export class MysqlAdapter extends BaseAdapter implements ISchemaAdapter, IProced
     this.assertConnected();
     const pkEntries = Object.entries(pkValues);
     if (!pkEntries.length) throw new Error('Cannot update row without primary key values');
-    const where = pkEntries.map(([k]) => `\`${k}\` = ?`).join(' AND ');
+    const where = pkEntries.map(([k]) => `${escId(k)} = ?`).join(' AND ');
     const params: unknown[] = [newValue, ...pkEntries.map(([, v]) => v)];
     const conn = await this.pool!.getConnection();
     try {
-      await conn.execute(`UPDATE \`${database}\`.\`${table}\` SET \`${column}\` = ? WHERE ${where}`, params as import('mysql2').ExecuteValues);
+      await conn.execute(`UPDATE ${escId(database)}.${escId(table)} SET ${escId(column)} = ? WHERE ${where}`, params as import('mysql2').ExecuteValues);
     } finally {
       conn.release();
     }
@@ -178,8 +181,8 @@ export class MysqlAdapter extends BaseAdapter implements ISchemaAdapter, IProced
     const col = type === 'function' ? 'Create Function' : 'Create Procedure';
     const conn = await this.pool!.getConnection();
     try {
-      await conn.query(`USE \`${database}\``);
-      const [rows] = await conn.query<mysql.RowDataPacket[]>(`SHOW CREATE ${keyword} \`${name}\``);
+      await conn.query(`USE ${escId(database)}`);
+      const [rows] = await conn.query<mysql.RowDataPacket[]>(`SHOW CREATE ${keyword} ${escId(name)}`);
       return (rows[0]?.[col] as string) ?? '';
     } finally {
       conn.release();

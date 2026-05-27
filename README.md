@@ -1,4 +1,4 @@
-# DB Connection
+# QueryForge
 
 A Visual Studio Code extension that provides a unified interface for browsing and querying multiple database engines directly from the editor.
 
@@ -153,8 +153,8 @@ Every executed query is automatically recorded per connection + database:
 ## Installation (from source)
 
 ```bash
-git clone <repo-url>
-cd db_connection
+git clone https://github.com/eberth-dev/queryforge
+cd queryforge
 npm install
 npm run build
 ```
